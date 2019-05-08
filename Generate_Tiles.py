@@ -50,7 +50,6 @@ import xml.etree.ElementTree as ET
 
 import csv
 
-import ephem
 from dateutil.parser import parse
 from datetime import tzinfo, timedelta, datetime
 import pytz as pytz
