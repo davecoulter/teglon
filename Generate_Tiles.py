@@ -48,7 +48,6 @@ from Pixel_Element import *
 
 import xml.etree.ElementTree as ET
 
-import math
 import csv
 
 import ephem
