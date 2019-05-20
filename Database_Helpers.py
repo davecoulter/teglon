@@ -6,7 +6,7 @@ def QueryDB(query, port='3306', query_data=None):
 	results = []
 	
 	# cnx = mysql.connector.connect(user='prospecktor', password='4Pr0spi3!', host='127.0.0.1', port=port, database='Prospecktor')
-	cnx = mysql.connector.connect(user='prospecktor', password='4Pr0spi3!', host='host.docker.internal', port=port, database='GLADE')
+	cnx = mysql.connector.connect(user='prospecktor', password='4Pr0spi3!', host='host.docker.internal', port=port, database='Prospecktor')
 
 	cursor = cnx.cursor()
 	
