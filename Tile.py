@@ -13,6 +13,10 @@ class Tile:
 		self.height = height
 		self.nside = nside
 		self.net_prob = net_prob
+		self.mwe = 0.0
+
+		# Gets set after construction
+		self.field_name = None
 
 		# Properties
 		self.__corner_coords = np.array([])

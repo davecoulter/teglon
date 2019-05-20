@@ -19,14 +19,17 @@ from Pixel_Element import *
 
 
 class Detector:
-	def __init__(self, detector_name, detector_width_npix, detector_height_npix, pixel_scale):
+	# def __init__(self, detector_name, detector_width_npix, detector_height_npix, pixel_scale):
+	def __init__(self, detector_name, detector_width_deg, detector_height_deg):
 		self.name = detector_name
-		self.width_npix = detector_width_npix
-		self.height_npix = detector_height_npix
-		self.pixel_scale = pixel_scale
+		# self.width_npix = detector_width_npix
+		# self.height_npix = detector_height_npix
+		# self.pixel_scale = pixel_scale
 
-		self.deg_width = self.width_npix * self.pixel_scale/3600. #arcseconds -> deg
-		self.deg_height = self.height_npix * self.pixel_scale/3600. #arcseconds -> deg
+		# self.deg_width = self.width_npix * self.pixel_scale/3600. #arcseconds -> deg
+		# self.deg_height = self.height_npix * self.pixel_scale/3600. #arcseconds -> deg
+		self.deg_width = detector_width_deg
+		self.deg_height = detector_height_deg
 
 class Unpacked_Healpix:
 	def __init__(self, file_name, prob, distmu, distsigma, distnorm, header, nside, 
@@ -311,10 +314,13 @@ class Cartographer:
 				_stddev = stddev_override
 
 			# Assuming 1 std error == 36% from GLADE
-			upper_lim = 0.5*(1.0 + erf(((g.dist*1.36) - _mean)/(_stddev*np.sqrt(2))))
-			lower_lim = 0.5*(1.0 + erf(((g.dist*0.64) - _mean)/(_stddev*np.sqrt(2))))
+			# upper_lim = 0.5*(1.0 + erf(((g.dist*1.36) - _mean)/(_stddev*np.sqrt(2))))
+			# lower_lim = 0.5*(1.0 + erf(((g.dist*0.64) - _mean)/(_stddev*np.sqrt(2))))
+			# z_prob = upper_lim - lower_lim
 
-			z_prob = upper_lim - lower_lim
+			# Using H0-derived redshift distances and distance errors
+			sigmaTotal = np.abs(g.z_dist - _mean)/np.sqrt(_stddev**2 + g.z_dist_err**2)
+			z_prob = 1.0 - erf(sigmaTotal)
 			three_d_prob = z_prob*_prob
 
 			lum_prob = g.B_lum_proxy/total_galaxy_lum
@@ -537,15 +543,16 @@ class glade_galaxy:
 	cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
 
 	def __init__(self, db_result, unpacked_healpix):
-		self.ID = db_result[0]
-		self.PGC = db_result[1]
-		self.Name_GWGC = db_result[2]
-		self.Name_HyperLEDA = db_result[3]
-		self.Name_2MASS = db_result[4]
-		self.Name_SDSS_DR12 = db_result[5]
+		self.ID = float(db_result[0])
+		self.Galaxy_id = float(db_result[1])
+		self.Distance_id = float(db_result[2])
+		self.PGC = db_result[3]
+		self.Name_GWGC = db_result[4]
+		self.Name_HyperLEDA = db_result[5]
+		self.Name_2MASS = db_result[6]
+		self.Name_SDSS_DR12 = db_result[7]
 		
-		self.RA = float(db_result[6]) if db_result[6] is not None else db_result[6]
-		# self.RA = float(db_result[6]) if db_result[6] is not '' else db_result[6]
+		self.RA = float(db_result[8]) if db_result[8] is not None else db_result[8]
 
 		# Hack: convert the RA of the galaxy from [0,360] to [-180,180]
 		g_ra = self.RA
@@ -553,8 +560,8 @@ class glade_galaxy:
 			g_ra = self.RA - 360.
 		self.RA = g_ra
 		
-		self.Dec = float(db_result[7]) if db_result[7] is not None else db_result[7]
-		self.dist = float(db_result[8]) if db_result[8] is not None else db_result[8]
+		self.Dec = float(db_result[9]) if db_result[9] is not None else db_result[9]
+		self.dist = float(db_result[10]) if db_result[10] is not None else db_result[10]
 		# self.Dec = float(db_result[7]) if db_result[7] is not '' else db_result[7]
 		# self.dist = float(db_result[8]) if db_result[8] is not '' else db_result[8]
 		
@@ -591,26 +598,26 @@ class glade_galaxy:
 		# 	self.enclosed_pix.append(self.pixel_index)
 		self.enclosed_pix.append(self.pixel_index)
 		
-		self.dist_err = float(db_result[9]) if db_result[9] is not None else db_result[9]	
-		# self.dist_err = float(db_result[9]) if db_result[9] is not '' else db_result[9]
-		self.z = db_result[10]
-		self.B = float(db_result[11]) if db_result[11] is not None else db_result[11]
-		# self.B = float(db_result[11]) if db_result[11] is not '' else db_result[11]
-		self.B_err = db_result[12]
-		self.B_abs = db_result[13]
-		self.J = db_result[14]
-		self.J_err = db_result[15]
-		self.H = db_result[16]
-		self.H_err = db_result[17]
-		self.K = db_result[18]
-		self.K_error = db_result[19]
-		self.flag1 = db_result[20]
-		self.flag2 = db_result[21]
-		self.flag3 = db_result[22]
-		self.B_lum_proxy = (self.dist**2)*10**(-0.4*self.B)
-		
+		self.dist_err = float(db_result[11]) if db_result[11] is not None else db_result[11]
+		self.z_dist = float(db_result[12]) if db_result[12] is not None else db_result[12]
+		self.z_dist_err = float(db_result[13]) if db_result[13] is not None else db_result[13]
+		self.z = float(db_result[14]) if db_result[14] is not None else db_result[14]
+		self.B = float(db_result[15]) if db_result[15] is not None else db_result[15]
+		self.B_err = float(db_result[16]) if db_result[16] is not None else db_result[16]
+		self.B_abs = float(db_result[17]) if db_result[17] is not None else db_result[17]
+		self.J = float(db_result[18]) if db_result[18] is not None else db_result[18]
+		self.J_err = float(db_result[19]) if db_result[19] is not None else db_result[19]
+		self.H = float(db_result[20]) if db_result[20] is not None else db_result[20]
+		self.H_err = float(db_result[21]) if db_result[21] is not None else db_result[21]
+		self.K = float(db_result[22]) if db_result[22] is not None else db_result[22]
+		self.K_error = float(db_result[23]) if db_result[23] is not None else db_result[23]
+		self.flag1 = db_result[24]
+		self.flag2 = db_result[25]
+		self.flag3 = db_result[26]
+
+		# self.B_lum_proxy = (self.dist**2)*10**(-0.4*self.B)
+		self.B_lum_proxy = (self.z_dist**2)*10**(-0.4*self.B)
 		self.relative_prob = 0.0
-		
 		
 	def plot(self, bmap, ax_to_plot, **kwargs):
 		

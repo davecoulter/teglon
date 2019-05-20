@@ -74,34 +74,53 @@ from Database_Helpers import *
 
 import time
 
+LOCAL_PORT = '3306'
 
 class GTT:
 	def __init__(self):
+
+		swope_deg_width = 4096*0.435/3600. # pix * plate scale / arcsec/pix => degrees
+		swope_deg_height = 4112*0.435/3600.
+
+		andicam_deg_width = 1024*0.371/3600.
+		andicam_deg_height = 1024*0.371/3600.
+
+		thacher_deg_width = 2048*0.609/3600.
+		thacher_deg_height = 2048*0.609/3600.
+
+		nickel_deg_width = 2048*0.368/3600.
+		nickel_deg_height = 2048*0.368/3600.
+
 		self.telescope_mapping = {
-		"S":"SWOPE",
-		"A":"ANDICAM",
-		"T":"THACHER",
-		"N":"NICKEL"}
+		"S":Detector("SWOPE", swope_deg_width, swope_deg_height),
+		"A":Detector("ANDICAM", andicam_deg_width, andicam_deg_height),
+		"T":Detector("THACHER", thacher_deg_width, thacher_deg_height),
+		"N":Detector("NICKEL", nickel_deg_width, nickel_deg_height)
+		}
 
 	def add_options(self, parser=None, usage=None, config=None):
 		import optparse
 		if parser == None:
 			parser = optparse.OptionParser(usage=usage, conflict_handler="resolve")
 
-		parser.add_option('--plate_scale', default=0.435, type="float",
-							  help='plate scale (default=%default)')
 
-		parser.add_option('--filter', default='i', type="string",
+		parser.add_option('--telescope_abbreviation', default="", type="str",
+			help='Abbreviation for telescope. Built-in telescopes: S - Swope, A - Andicam, T - Thacher, N - Nickel. \nIf using a non-built in, use another character/char combination and provide detector width and height.')
+
+		parser.add_option('--telescope_name', default="", type="str",
+			help='Name of telescope. Ignore for built-in telescopes: S - Swope, A - Andicam, T - Thacher, N - Nickel. \nIf using a non-built in, specify name.')
+
+		parser.add_option('--detector_width_deg', default=0, type="float",
+			help='Detector width in degrees. For circular apertures, use radius for width and height.')
+
+		parser.add_option('--detector_height_deg', default=0, type="float",
+			help='Detector height in degrees. For circular apertures, use radius for width and height.')
+
+		parser.add_option('--filter', default='r', type="string",
 							  help='Filter choice (default=%default)')
 
 		parser.add_option('--exp_time', default='60.0', type="float",
 							  help='Exposure time (default=%default)')
-
-		parser.add_option('--detector_width_npix', default=4096, type="float",
-							  help='detector width, in pixels (default=%default)')
-
-		parser.add_option('--detector_height_npix', default=4112, type="float",
-							  help='detector height, in pixels (default=%default)')
 
 		parser.add_option('--healpix_file', default="", type="str",
 						help='healpix filename.')
@@ -110,9 +129,6 @@ class GTT:
 
 		parser.add_option('--gw_id', default="", type="str",
 						help='LIGO superevent name, e.g. `S190425z` ')
-
-		parser.add_option('--telescope_abbreviation', default="S", type="str",
-							  help='one-letter abbreviation for telescope, S - Swope, A - Andicam, T - Thacher, N - Nickel (default=%default)')
 
 		parser.add_option('--event_number', default=1, type="int",
 							  help='event number (default=%default)')
@@ -124,17 +140,49 @@ class GTT:
 
 	def main(self):
 
-		# hpx_path = "%s/%s" % (self.options.working_dir, self.options.healpix_file)
-		detector = Detector(self.telescope_mapping[self.options.telescope_abbreviation],
-			float(self.options.detector_width_npix), 
-			float(self.options.detector_height_npix),
-			float(self.options.plate_scale))
+		hpx_path = "%s/%s" % (self.options.working_dir, self.options.healpix_file)
+
+		# If you specify a telescope that's not in the default list, you must provide the rest of the information
+		detector = None
+		is_error = False
+
+		if self.options.telescope_abbreviation not in self.telescope_mapping.keys():
+			print("Running for custom telescope. Checking required parameters...")
+
+			if self.options.telescope_abbreviation == "":
+				is_error = True
+				print("For custom telescope, `telescope_abbreviation` is required!")
+
+			if self.options.telescope_name == "":
+				is_error = True
+				print("For custom telescope, `telescope_name` is required!")
+
+			if self.options.detector_width_deg <= 0.0:
+				is_error = True
+				print("For custom telescope, `detector_width_deg` is required, and must be > 0!")
+
+			if self.options.detector_height_deg <= 0.0:
+				is_error = True
+				print("For custom telescope, `detector_height_deg` is required, and must be > 0!")
+
+			if is_error:
+				print("Exiting...")
+				return 1
+
+			detector = Detector(self.options.telescope_name, self.options.detector_width_deg, self.options.detector_height_deg)
+		else:
+			detector = self.telescope_mapping[self.options.telescope_abbreviation]
+
+
+		print("Telescope: `%s -- %s`, width: %s [deg]; height %s [deg]" % (self.options.telescope_abbreviation,
+			detector.name, detector.deg_width, detector.deg_height))
+		print("\n\n%s FOV area: %s" % (detector.name, (detector.deg_width * detector.deg_height)))
+
 
 		print("Loading base cartography...")
 		base_cartography = None
 		with open('%s/%s_base_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
 			base_cartography = pickle.load(handle)
-
 
 		print("Loading sql pixel map...")
 		sql_pixel_map = None
@@ -179,8 +227,12 @@ if __name__ == "__main__":
 
 	useagestring="""python Generate_Tiles.py [options]
 
-example:
-python Generate_Tiles.py --working_dir GW170817/ --healpix_file LALInference_v2.fits.gz,0 --event_name GW170817 --event_number 1 --telescope_abbreviation S"""
+Default telescope example:
+python Generate_Tiles.py --gw_id S190425z --working_dir GW190425_Swope --healpix_file LALInference.fits.gz,0 --event_number 5 --telescope_abbreviation S --filter r --exp_time 180 --schedule_designation AA
+
+Custom telescope example:
+python Generate_Tiles.py --gw_id S190425z --working_dir GW190425_Swope --healpix_file LALInference.fits.gz,0 --event_number 5 --telescope_abbreviation SO --telescope_name SOAR --detector_width_deg 0.12 --detector_height_deg 0.12 --filter r --exp_time 180 --schedule_designation AA
+"""
 	
 	start = time.time()
 
