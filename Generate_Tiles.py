@@ -449,10 +449,10 @@ if __name__ == "__main__":
 	useagestring="""python Generate_Tiles.py [options]
 
 Default telescope example:
-python Generate_Tiles.py --gw_id S190425z --working_dir GW190425_Swope --healpix_file LALInference.fits.gz,0 --event_number 5 --telescope_abbreviation S --filter r --exp_time 180 --schedule_designation AA
+python Generate_Tiles.py --gw_id S190425z --healpix_dir S190521g --healpix_file bayestar.fits.gz,0 --working_dir S190521g_Swope  --event_number 14 --telescope_abbreviation S --filter r --exp_time 180 --schedule_designation AA
 
 Custom telescope example:
-python Generate_Tiles.py --gw_id S190425z --working_dir GW190425_Swope --healpix_file LALInference.fits.gz,0 --event_number 5 --telescope_abbreviation SO --telescope_name SOAR --detector_width_deg 0.12 --detector_height_deg 0.12 --filter r --exp_time 180 --schedule_designation AA
+python Generate_Tiles.py --gw_id S190425z --healpix_dir S190521g --healpix_file bayestar.fits.gz,0 --working_dir S190521g_SOAR  --event_number 14 --telescope_abbreviation SO --telescope_name SOAR --detector_width_deg 0.12 --detector_height_deg 0.12 --filter r --exp_time 180 --schedule_designation AA
 """
 	
 	start = time.time()
