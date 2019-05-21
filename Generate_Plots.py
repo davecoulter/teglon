@@ -176,7 +176,8 @@ class GTT:
 
 		print("Telescope: `%s -- %s`, width: %s [deg]; height %s [deg]" % (self.options.telescope_abbreviation,
 			detector.name, detector.deg_width, detector.deg_height))
-		print("\n\n%s FOV area: %s" % (detector.name, (detector.deg_width * detector.deg_height)))
+		fov_area = (detector.deg_width * detector.deg_height)
+		print("\n\n%s FOV area: %s" % (detector.name, fov_area))
 
 
 		print("Loading base cartography...")
@@ -210,6 +211,91 @@ class GTT:
 			redistributed_cartography = pickle.load(handle)
 
 
+
+		# # Thacher
+		# thacher_tiles = []
+		# with open('%s/S190521g_AA_THACHER_Tiles.txt' % self.options.working_dir,'r') as csvfile:
+
+		#     csvreader = csv.reader(csvfile, delimiter=',')
+		#     next(csvreader)
+		    
+		#     for row in csvreader:
+		#         t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), detector.deg_width, detector.deg_height, 
+		#                  redistributed_cartography.unpacked_healpix.nside)
+		#         t.field_name = row[0]
+		#         t.net_prob = np.sum(redistributed_cartography.unpacked_healpix.prob[t.enclosed_pixel_indices])
+
+  #       		print("Tile #: %s; Net prob: %0.4f" % (t.field_name, t.net_prob))
+
+		#         thacher_tiles.append(t)
+
+
+
+		# above_30 = []
+		# for t in thacher_tiles:
+		# 	if t.coord.dec.degree > -30.0:
+		# 		above_30.append(t)
+
+		# sorted_tiles = sorted(above_30, key=lambda t: t.net_prob, reverse=True)
+		# print("Number of northern tiles: %s" % len(sorted_tiles))
+
+		# top_200 = sorted_tiles[0:199]
+		# top_200_prob = np.sum([t.net_prob for t in top_200])
+		# print("Prob of northern, top 200: %s" % top_200_prob)
+
+		# top_200_area = fov_area*200
+		# print("Area of northern, top 200: %s" % top_200_area)
+
+		# def GetSexigesimalString(c):
+		# 	ra = c.ra.hms
+		# 	dec = c.dec.dms
+
+		# 	ra_string = "%02d:%02d:%05.2f" % (ra[0],ra[1],ra[2])
+		# 	if dec[0] >= 0:
+		# 		dec_string = "+%02d:%02d:%05.2f" % (dec[0],np.abs(dec[1]),np.abs(dec[2]))
+		# 	else:
+		# 		dec_string = "%03d:%02d:%05.2f" % (dec[0],np.abs(dec[1]),np.abs(dec[2]))
+
+		# 	# Python has a -0.0 object. If the deg is this (because object lies < 60 min south), the string formatter will drop the negative sign
+		# 	if c.dec < 0.0 and dec[0] == 0.0:
+		# 		dec_string = "-00:%02d:%05.2f" % (np.abs(dec[1]),np.abs(dec[2]))
+		# 	return (ra_string, dec_string)
+
+		# with open('%s/S190521g_AA_THACHER_Tiles_Northern_200.txt' % self.options.working_dir,'w') as csvfile:
+
+		# 	csvwriter = csv.writer(csvfile)
+
+		# 	cols = []
+		# 	cols.append('# FieldName')
+		# 	cols.append('FieldRA')
+		# 	cols.append('FieldDec')
+		# 	cols.append('Telscope')
+		# 	cols.append('Filter')
+		# 	cols.append('ExpTime')
+		# 	cols.append('Priority')
+		# 	cols.append('Status')
+		# 	csvwriter.writerow(cols)
+
+		# 	for i, st in enumerate(top_200):
+
+		# 		coord_str = GetSexigesimalString(st.coord) 
+
+		# 		cols = []
+				
+		# 		cols.append(st.field_name)
+		# 		cols.append(coord_str[0])
+		# 		cols.append(coord_str[1])
+		# 		cols.append(detector.name)
+		# 		cols.append(self.options.filter)
+		# 		cols.append(self.options.exp_time)
+		# 		print(st.net_prob)
+		# 		cols.append(st.net_prob)
+		# 		cols.append('False')
+		# 		csvwriter.writerow(cols)
+
+		# 	print("Done")
+
+
 		plot_probability_map("%s/%s_SQL_Tiles" % (self.options.working_dir, self.options.gw_id),
 					 pixels=sql_pixel_map.pixels_90,
 					 tiles=sql_tile_cartography.tiles, 
@@ -218,6 +304,17 @@ class GTT:
 		plot_probability_map("%s/%s_%s_Redistributed_90th_Tiles" % (self.options.working_dir, self.options.gw_id, detector.name),
 					 pixels=redistributed_cartography.unpacked_healpix.pixels_90,
 					 tiles=redistributed_cartography.tiles)
+
+
+		# plot_probability_map_2("%s/%s_%s_Redistributed_90th_Tiles" % (self.options.working_dir, self.options.gw_id, detector.name),
+		# 				central_lon=330,
+		# 				 central_lat=30,
+		# 				 lower_left_corner_lat=15,
+		# 				 lower_left_corner_lon=345,
+		# 				 upper_right_corner_lat=45,
+		# 				 upper_right_corner_lon=315,
+		# 			 pixels=redistributed_cartography.unpacked_healpix.pixels_90,
+		# 			 tiles=redistributed_cartography.tiles)
 
 
 if __name__ == "__main__":

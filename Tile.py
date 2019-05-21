@@ -18,6 +18,10 @@ class Tile:
 		# Gets set after construction
 		self.field_name = None
 
+		self.contained_galaxies = []
+		self.mean_pixel_distance = None
+		self.tile_glade_completeness = -999
+
 		# Properties
 		self.__corner_coords = np.array([])
 		self.__corner_xyz = np.array([])
