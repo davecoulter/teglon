@@ -121,6 +121,8 @@ class GTT:
 		parser.add_option('--exp_time', default='60.0', type="float",
 							  help='Exposure time (default=%default)')
 
+		parser.add_option('--healpix_dir', default='./', type="str",help='Directory for where to look for the healpix file.')
+
 		parser.add_option('--healpix_file', default="", type="str",
 						help='healpix filename.')
 
@@ -139,7 +141,7 @@ class GTT:
 
 	def main(self):
 
-		hpx_path = "%s/%s" % (self.options.working_dir, self.options.healpix_file)
+		hpx_path = "%s/%s" % (self.options.healpix_dir, self.options.healpix_file)
 		
 		
 		# If you specify a telescope that's not in the default list, you must provide the rest of the information
@@ -174,9 +176,9 @@ class GTT:
 			detector = self.telescope_mapping[self.options.telescope_abbreviation]
 
 
-		print("Telescope: `%s -- %s`, width: %s [deg]; height %s [deg]" % (self.options.telescope_abbreviation,
+		print("\n\nTelescope: `%s -- %s`, width: %s [deg]; height %s [deg]" % (self.options.telescope_abbreviation,
 			detector.name, detector.deg_width, detector.deg_height))
-		print("\n\n%s FOV area: %s" % (detector.name, (detector.deg_width * detector.deg_height)))
+		print("%s FOV area: %s" % (detector.name, (detector.deg_width * detector.deg_height)))
 
 
 		print("Unpacking '%s':%s..." % (self.options.gw_id, hpx_path))
