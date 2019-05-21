@@ -16,6 +16,7 @@ from scipy.special import erf
 import copy
 from Tile import *
 from Pixel_Element import *
+import pprint
 
 
 class Detector:
@@ -543,9 +544,9 @@ class glade_galaxy:
 	cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
 
 	def __init__(self, db_result, unpacked_healpix):
-		self.ID = float(db_result[0])
-		self.Galaxy_id = float(db_result[1])
-		self.Distance_id = float(db_result[2])
+		self.ID = int(db_result[0])
+		self.Galaxy_id = int(db_result[1])
+		self.Distance_id = int(db_result[2])
 		self.PGC = db_result[3]
 		self.Name_GWGC = db_result[4]
 		self.Name_HyperLEDA = db_result[5]
@@ -610,7 +611,7 @@ class glade_galaxy:
 		self.H = float(db_result[20]) if db_result[20] is not None else db_result[20]
 		self.H_err = float(db_result[21]) if db_result[21] is not None else db_result[21]
 		self.K = float(db_result[22]) if db_result[22] is not None else db_result[22]
-		self.K_error = float(db_result[23]) if db_result[23] is not None else db_result[23]
+		self.K_err = float(db_result[23]) if db_result[23] is not None else db_result[23]
 		self.flag1 = db_result[24]
 		self.flag2 = db_result[25]
 		self.flag3 = db_result[26]
@@ -618,6 +619,8 @@ class glade_galaxy:
 		# self.B_lum_proxy = (self.dist**2)*10**(-0.4*self.B)
 		self.B_lum_proxy = (self.z_dist**2)*10**(-0.4*self.B)
 		self.relative_prob = 0.0
+
+		self.galaxy_glade_completeness = -999
 		
 	def plot(self, bmap, ax_to_plot, **kwargs):
 		
