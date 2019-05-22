@@ -302,6 +302,7 @@ class Cartographer:
 		
 		i = 0
 		print("assign gs")
+		print(len(galaxies))
 		for g in galaxies:
 
 			print(i)
@@ -331,6 +332,7 @@ class Cartographer:
 			lum_prob = g.B_lum_proxy/total_galaxy_lum
 			four_d_prob = lum_prob*three_d_prob
 			galaxy_probs.append(four_d_prob)
+			i += 1
 
 		# Renormalize
 		galaxy_probs = (galaxy_probs/np.sum(galaxy_probs))*galaxy_cum_prob
