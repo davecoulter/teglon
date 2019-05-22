@@ -17,6 +17,7 @@ import copy
 from Tile import *
 from Pixel_Element import *
 import pprint
+import time
 
 
 class Detector:
@@ -293,52 +294,80 @@ class Cartographer:
 
 	def assign_galaxy_relative_prob(unpacked_healpix, galaxies, cum_prob_in_tiles, completeness, distance_override=0.0, stddev_override=0.0):
 		
+	
+		t1 = time.time()
+
 		# Get probability to distribute to galaxies
 		galaxy_cum_prob = completeness * cum_prob_in_tiles
 		
 		# Get normalization for galaxy luminosity proxy
 		total_galaxy_lum = np.sum([g.B_lum_proxy for g in galaxies])
-		galaxy_probs = []
 		
-		i = 0
-		print("assign gs")
-		print(len(galaxies))
-		for g in galaxies:
+		galaxy_pixel_indices = [g.pixel_index for g in galaxies]
+		galaxy_distances = [g.z_dist for g in galaxies]
+		galaxy_distance_errs = [g.z_dist_err for g in galaxies]
+		galaxy_lums = [g.B_lum_proxy for g in galaxies]
 
-			print(i)
+		_prob = unpacked_healpix.prob[galaxy_pixel_indices]
+		_distmu = unpacked_healpix.distmu[galaxy_pixel_indices]
+		_distsigma = unpacked_healpix.distsigma[galaxy_pixel_indices]
+		_distnorm = unpacked_healpix.distnorm[galaxy_pixel_indices]
+		_mean, _stddev, _norm = distance.parameters_to_moments(_distmu, _distsigma)
 
-			_prob = unpacked_healpix.prob[g.pixel_index]
-			_distmu = unpacked_healpix.distmu[g.pixel_index]
-			_distsigma = unpacked_healpix.distsigma[g.pixel_index]
-			_distnorm = unpacked_healpix.distnorm[g.pixel_index]
-			_mean, _stddev, _norm = distance.parameters_to_moments(_distmu, _distsigma)
+		# sq_stddev = [s**2 for s in _stddev]
+		# sq_galaxy_distance_errs = [s**2 for s in galaxy_distance_errs]
+		numerator = np.subtract(galaxy_distances, _mean)
+		denominator = np.add(np.power(_stddev, 2), np.power(galaxy_distance_errs, 2))
+
+		sigmaTotal = np.abs(numerator)/np.sqrt(denominator)
+		z_prob = 1.0 - erf(sigmaTotal)
+		three_d_prob = z_prob*_prob
+
+		lum_prob = galaxy_lums/total_galaxy_lum
+		four_d_prob = lum_prob*three_d_prob
+		four_d_prob = (four_d_prob/np.sum(four_d_prob))*galaxy_cum_prob # normalize
+
+
+		# for g in galaxies:
+
+		# 	_prob = unpacked_healpix.prob[g.pixel_index]
+		# 	_distmu = unpacked_healpix.distmu[g.pixel_index]
+		# 	_distsigma = unpacked_healpix.distsigma[g.pixel_index]
+		# 	_distnorm = unpacked_healpix.distnorm[g.pixel_index]
+		# 	_mean, _stddev, _norm = distance.parameters_to_moments(_distmu, _distsigma)
 			
-			if distance_override > 0.0:
-				_mean = distance_override
+		# 	if distance_override > 0.0:
+		# 		_mean = distance_override
 				
-			if stddev_override > 0.0:
-				_stddev = stddev_override
+		# 	if stddev_override > 0.0:
+		# 		_stddev = stddev_override
 
-			# Assuming 1 std error == 36% from GLADE
-			# upper_lim = 0.5*(1.0 + erf(((g.dist*1.36) - _mean)/(_stddev*np.sqrt(2))))
-			# lower_lim = 0.5*(1.0 + erf(((g.dist*0.64) - _mean)/(_stddev*np.sqrt(2))))
-			# z_prob = upper_lim - lower_lim
+		# 	# Assuming 1 std error == 36% from GLADE
+		# 	# upper_lim = 0.5*(1.0 + erf(((g.dist*1.36) - _mean)/(_stddev*np.sqrt(2))))
+		# 	# lower_lim = 0.5*(1.0 + erf(((g.dist*0.64) - _mean)/(_stddev*np.sqrt(2))))
+		# 	# z_prob = upper_lim - lower_lim
 
-			# Using H0-derived redshift distances and distance errors
-			sigmaTotal = np.abs(g.z_dist - _mean)/np.sqrt(_stddev**2 + g.z_dist_err**2)
-			z_prob = 1.0 - erf(sigmaTotal)
-			three_d_prob = z_prob*_prob
+		# 	# Using H0-derived redshift distances and distance errors
+		# 	sigmaTotal = np.abs(g.z_dist - _mean)/np.sqrt(_stddev**2 + g.z_dist_err**2)
+		# 	z_prob = 1.0 - erf(sigmaTotal)
+		# 	three_d_prob = z_prob*_prob
 
-			lum_prob = g.B_lum_proxy/total_galaxy_lum
-			four_d_prob = lum_prob*three_d_prob
-			galaxy_probs.append(four_d_prob)
-			i += 1
+		# 	lum_prob = g.B_lum_proxy/total_galaxy_lum
+		# 	four_d_prob = lum_prob*three_d_prob
+		# 	galaxy_probs.append(four_d_prob)
 
-		# Renormalize
-		galaxy_probs = (galaxy_probs/np.sum(galaxy_probs))*galaxy_cum_prob
+
+		# # Renormalize
+		# galaxy_probs = (galaxy_probs/np.sum(galaxy_probs))*galaxy_cum_prob
 		
 		for i, g in enumerate(galaxies):
-			g.relative_prob = galaxy_probs[i]
+			g.relative_prob = four_d_prob[i]
+
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`assign_galaxy_relative_prob` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
 
 	def redistribute_probability(unpacked_healpix, galaxies, tiles, completeness):
 		
