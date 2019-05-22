@@ -300,7 +300,11 @@ class Cartographer:
 		total_galaxy_lum = np.sum([g.B_lum_proxy for g in galaxies])
 		galaxy_probs = []
 		
+		i = 0
+		print("assign gs")
 		for g in galaxies:
+
+			print(i)
 
 			_prob = unpacked_healpix.prob[g.pixel_index]
 			_distmu = unpacked_healpix.distmu[g.pixel_index]
