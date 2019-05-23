@@ -558,9 +558,11 @@ class Cartographer:
 		manager = mp.Manager()
 		q = manager.Queue()
 		pool = mp.Pool()
-		result = pool.map_async(invoke_enclosed_pix, [(g, q) for g in good_tiles])
-		pool.close()
-		pool.join()
+		# result = pool.map_async(invoke_enclosed_pix, [(g, q) for g in good_tiles])
+		iterable_gts = [(g, q) for g in good_tiles]
+		result = pool.map(invoke_enclosed_pix, iterable_gts, 1000)
+		# pool.close()
+		# pool.join()
 
 		# print("sleep for 180s...")
 		# time.sleep(180)
