@@ -610,7 +610,7 @@ class Cartographer:
 		print("********* end DEBUG ***********\n")
 
 		# return cum_prob, good_tiles
-		return cum_prob, new_tiles
+		return cum_prob, initialized_tiles
 
 	def __init__(self, gwid, unpacked_healpix, rescale_detector, all_sky_coords, generate_tiles=True):
 		
