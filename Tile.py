@@ -109,11 +109,17 @@ class Tile:
 	
 	@property
 	def enclosed_pixel_indices(self):
+
+		# preinitialized = True
 		
 		if len(self.__enclosed_pixel_indices) == 0:
+
+			# preinitialized = False
+
 			internal_pix = hp.query_polygon(self.nside, self.corner_xyz, inclusive=False)
 			self.__enclosed_pixel_indices = internal_pix
 			
+		# print(preinitialized)
 		return self.__enclosed_pixel_indices
 	
 	def plot(self, bmap, ax_to_plot, **kwargs): #bmap, 

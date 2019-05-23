@@ -181,9 +181,23 @@ class GTT:
 		print("%s FOV area: %s" % (detector.name, (detector.deg_width * detector.deg_height)))
 
 
+
+
+
+		t1 = time.time()
+		
 		print("Unpacking '%s':%s..." % (self.options.gw_id, hpx_path))
 		prob, distmu, distsigma, distnorm, header_gen = hp.read_map(hpx_path, field=(0,1,2,3), h=True)
 		header = dict(header_gen)
+
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`Unpacking healpix` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
+
+
+
 
 		npix = len(prob)
 		print("\nNumber of pix in '%s': %s" % (hpx_path,len(prob)))
@@ -251,7 +265,6 @@ class GTT:
 		sql_tile_size = Detector("sql_tile", 10.0, 10.0) # 10 degrees in arcseconds
 		
 
-
 		# Generate all sky coords for the large SQL tiles
 		print("Generating all sky coords for %s" % sql_tile_size.name)
 		sql_tile_all_sky_coords = Cartographer.generate_all_sky_coords(sql_tile_size, 
@@ -288,6 +301,8 @@ class GTT:
 		# 			 tiles=sql_tile_cartography.tiles, 
 		# 			 colormap=plt.cm.viridis)
 
+
+		t1 = time.time()
 
 		ra_between = []
 		dec_between = []
@@ -339,6 +354,11 @@ class GTT:
 
 		print("Query returned %s galaxies" % len(contained_galaxies))
 
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`Query database` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
 
 
 
@@ -396,6 +416,7 @@ class GTT:
 			return (ra_string, dec_string)
 
 
+		t1 = time.time()
 		sorted_tiles = sorted(redistributed_cartography.tiles, 
 			key=lambda x: x.net_prob, 
 			reverse=True)
@@ -439,6 +460,12 @@ class GTT:
 				csvwriter.writerow(cols)
 
 			print("Done")
+
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`Serialize tiles` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
 
 
 if __name__ == "__main__":

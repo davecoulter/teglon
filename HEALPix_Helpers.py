@@ -17,8 +17,8 @@ import copy
 from Tile import *
 from Pixel_Element import *
 import pprint
-import time
-
+import time	
+import multiprocessing as mp
 
 class Detector:
 	# def __init__(self, detector_name, detector_width_npix, detector_height_npix, pixel_scale):
@@ -36,7 +36,7 @@ class Detector:
 class Unpacked_Healpix:
 	def __init__(self, file_name, prob, distmu, distsigma, distnorm, header, nside, 
 		npix, area_per_px, linestyle, compute_contours=True):
-		
+
 		self.file_name = file_name
 		self.prob = prob
 		self.distmu = distmu
@@ -63,6 +63,9 @@ class Unpacked_Healpix:
 		self.initialize(compute_contours)
 		
 	def initialize(self, compute_contours):
+
+		t1 = time.time()
+
 		sorted_prob = np.sort(self.prob)
 		sorted_prob = sorted_prob[::-1] # Reverse sort (highest first)
 		max_prob = np.max(sorted_prob)
@@ -98,6 +101,12 @@ class Unpacked_Healpix:
 		if compute_contours:
 			print("Computing contours for '%s'...\n" % self.file_name)
 			self.compute_contours()
+
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`Unpacked_Healpix.initialize` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
 	
 	def get_prob_val_and_index(self, sorted_prob, cum_cutoff):
 		cum_prob = 0.0
@@ -147,9 +156,18 @@ class Unpacked_Healpix:
 		self.Y = Y
 		self.Z = Z
 
+def invoke_enclosed_pix(args):
+	tile = args[0]
+	queue = args[1]
+	
+	tile.enclosed_pixel_indices
+	queue.put(tile)
+
 class Cartographer:
 
 	def downsample_map(detector, unpacked_healpix):
+
+		t1 = time.time()
 
 		# We wish to find a map resolution that is similar to the FOV size of a given telescope
 		detector_area = detector.deg_width*detector.deg_height
@@ -204,12 +222,20 @@ class Cartographer:
 			rescaled_area_per_pix,
 			linestyle="-",
 			compute_contours=True)
+
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`downsample_map` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
 		
 		return rescaled_unpacked_healpix
 
 	def generate_all_sky_coords(detector, starting_ra, starting_dec):
 	
 		# prob_sorted_pix = np.asarray(sorted(rescaled_pixels, key=lambda p: p.prob, reverse=True))
+		t1 = time.time()
+		
 
 		fov_fraction = 1.0
 		northern_limit = 90.0
@@ -289,6 +315,12 @@ class Cartographer:
 		print("Total coords for %s: %s" % (detector.name, len(all_sky_coords)))
 
 		print("\n******\n")
+
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`generate_all_sky_coords` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
 		
 		return all_sky_coords
 
@@ -371,6 +403,8 @@ class Cartographer:
 
 	def redistribute_probability(unpacked_healpix, galaxies, tiles, completeness):
 		
+		t1 = time.time()
+
 		# Copy probability
 		redistributed_prob = copy.deepcopy(unpacked_healpix.prob)
 		
@@ -406,10 +440,19 @@ class Cartographer:
 			linestyle="-", 
 			compute_contours=True)
 		
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`redistribute_probability` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
+
 		return redistributed_unpacked_healpix
 
 	def generate_tiles(unpacked_healpix, rescaled_pixels_90, rescale_detector, all_sky_coords, fudge_factor=0.75):
 			
+
+		t1 = time.time()
+
 		good_tiles = []
 		
 		fov_fraction = 1.0
@@ -506,16 +549,46 @@ class Cartographer:
 
 			common = set(dec_indices).intersection(set(ra_indices))
 			if len(common) > 0:
-				good_tiles.append(Tile(coord.SkyCoord(t[0],
-					t[1],
+				good_tiles.append(Tile(coord.SkyCoord(t[0],t[1],
 					unit=(u.deg,u.deg)), rescale_detector.deg_width, rescale_detector.deg_height, unpacked_healpix.nside))
 
+		
 		cum_prob = 0.0
-		for t in good_tiles:
+			
+		manager = mp.Manager()
+		q = manager.Queue()
+		pool = mp.Pool()
+		result = pool.map_async(invoke_enclosed_pix, [(g, q) for g in good_tiles])
+		pool.close()
+		pool.join()
+
+		# print("sleep for 180s...")
+		# time.sleep(180)
+		# print("...back!")
+
+		new_tiles = []
+		while not q.empty():
+			new_tiles.append(q.get())
+
+		print("Number of new tiles: %s" % len(new_tiles))
+		# raise("Breaking execution")
+
+		
+		# for t in good_tiles:
+		# 	t.net_prob = np.sum(unpacked_healpix.prob[t.enclosed_pixel_indices])
+		# 	cum_prob += t.net_prob
+		for t in new_tiles:
 			t.net_prob = np.sum(unpacked_healpix.prob[t.enclosed_pixel_indices])
 			cum_prob += t.net_prob
 		
-		return cum_prob, good_tiles
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`generate_tiles` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
+
+		# return cum_prob, good_tiles
+		return cum_prob, new_tiles
 
 	def __init__(self, gwid, unpacked_healpix, rescale_detector, all_sky_coords, generate_tiles=True):
 		
