@@ -18,7 +18,9 @@ from Tile import *
 from Pixel_Element import *
 import pprint
 import time	
+
 import multiprocessing as mp
+from scipy import spatial
 
 class Detector:
 	# def __init__(self, detector_name, detector_width_npix, detector_height_npix, pixel_scale):
@@ -455,112 +457,128 @@ class Cartographer:
 
 		good_tiles = []
 		
-		fov_fraction = 1.0
-		northern_limit = 90.0
-		southern_limit = -90.0
-		eastern_limit = 360.0
-		western_limit = 0.0
+		# fov_fraction = 1.0
+		# northern_limit = 90.0
+		# southern_limit = -90.0
+		# eastern_limit = 360.0
+		# western_limit = 0.0
 		
-		dec_sorted_pix = np.asarray(sorted(rescaled_pixels_90, key=lambda p: p.coord.dec.degree))
-		ra_sorted_pix = np.asarray(sorted(rescaled_pixels_90, key=lambda p: p.coord.ra.degree))
+		# dec_sorted_pix = np.asarray(sorted(rescaled_pixels_90, key=lambda p: p.coord.dec.degree))
+		# ra_sorted_pix = np.asarray(sorted(rescaled_pixels_90, key=lambda p: p.coord.ra.degree))
 
-		pix_dec_by_dec = np.asarray([d.coord.dec.degree for d in dec_sorted_pix])
-		pix_ra_by_ra = np.asarray([r.coord.ra.degree for r in ra_sorted_pix])
+		# pix_dec_by_dec = np.asarray([d.coord.dec.degree for d in dec_sorted_pix])
+		# pix_ra_by_ra = np.asarray([r.coord.ra.degree for r in ra_sorted_pix])
 
-		pix_index_by_dec = np.asarray([d.index for d in dec_sorted_pix])
-		pix_index_by_ra = np.asarray([r.index for r in ra_sorted_pix])
+		# pix_index_by_dec = np.asarray([d.index for d in dec_sorted_pix])
+		# pix_index_by_ra = np.asarray([r.index for r in ra_sorted_pix])
 
-		for ti, t in enumerate(all_sky_coords):
+		# for ti, t in enumerate(all_sky_coords):
 
-			dec_bounds = []
-			ra_bounds = []
+		# 	dec_bounds = []
+		# 	ra_bounds = []
 
-			dec_offset = fudge_factor * fov_fraction * rescale_detector.deg_height 
+		# 	dec_offset = fudge_factor * fov_fraction * rescale_detector.deg_height 
 
-			temp_upper_dec = t[1] + dec_offset
-			temp_lower_dec = t[1] - dec_offset
+		# 	temp_upper_dec = t[1] + dec_offset
+		# 	temp_lower_dec = t[1] - dec_offset
 
-			if temp_upper_dec > northern_limit:
+		# 	if temp_upper_dec > northern_limit:
 
-				upper_limit1 = northern_limit
-				lower_limit1 = northern_limit - (dec_offset - (temp_upper_dec % northern_limit))
+		# 		upper_limit1 = northern_limit
+		# 		lower_limit1 = northern_limit - (dec_offset - (temp_upper_dec % northern_limit))
 
-				upper_limit2 = southern_limit + (temp_upper_dec % northern_limit)
-				lower_limit2 = southern_limit
+		# 		upper_limit2 = southern_limit + (temp_upper_dec % northern_limit)
+		# 		lower_limit2 = southern_limit
 
-				dec_bounds.append([upper_limit1,lower_limit1])
-				dec_bounds.append([upper_limit2,lower_limit2])
+		# 		dec_bounds.append([upper_limit1,lower_limit1])
+		# 		dec_bounds.append([upper_limit2,lower_limit2])
 
-			elif temp_lower_dec < southern_limit:
+		# 	elif temp_lower_dec < southern_limit:
 
-				upper_limit1 = southern_limit + (dec_offset + (temp_lower_dec % southern_limit))
-				lower_limit1 = southern_limit
+		# 		upper_limit1 = southern_limit + (dec_offset + (temp_lower_dec % southern_limit))
+		# 		lower_limit1 = southern_limit
 
-				upper_limit2 = northern_limit
-				lower_limit2 = northern_limit + (temp_lower_dec % southern_limit)
+		# 		upper_limit2 = northern_limit
+		# 		lower_limit2 = northern_limit + (temp_lower_dec % southern_limit)
 
-				dec_bounds.append([upper_limit1,lower_limit1])
-				dec_bounds.append([upper_limit2,lower_limit2])
+		# 		dec_bounds.append([upper_limit1,lower_limit1])
+		# 		dec_bounds.append([upper_limit2,lower_limit2])
 
-			else:
-				dec_bounds.append([temp_upper_dec,temp_lower_dec])
+		# 	else:
+		# 		dec_bounds.append([temp_upper_dec,temp_lower_dec])
 
-			ra_offset = fudge_factor * (fov_fraction * rescale_detector.deg_width)/np.abs(np.cos(np.radians(t[1])))
+		# 	ra_offset = fudge_factor * (fov_fraction * rescale_detector.deg_width)/np.abs(np.cos(np.radians(t[1])))
 
-			temp_left_limit = t[0] + ra_offset
-			temp_right_limit = t[0] - ra_offset
+		# 	temp_left_limit = t[0] + ra_offset
+		# 	temp_right_limit = t[0] - ra_offset
 
 
-			if temp_left_limit > eastern_limit:
+		# 	if temp_left_limit > eastern_limit:
 
-				left_limit1 = eastern_limit
-				right_limit1 = eastern_limit - (ra_offset - (temp_left_limit % eastern_limit))
+		# 		left_limit1 = eastern_limit
+		# 		right_limit1 = eastern_limit - (ra_offset - (temp_left_limit % eastern_limit))
 
-				left_limit2 = ra_offset - (temp_left_limit % eastern_limit)
-				right_limit2 = western_limit
+		# 		left_limit2 = ra_offset - (temp_left_limit % eastern_limit)
+		# 		right_limit2 = western_limit
 
-				ra_bounds.append([left_limit1,left_limit1])
-				ra_bounds.append([left_limit2,left_limit2])
+		# 		ra_bounds.append([left_limit1,left_limit1])
+		# 		ra_bounds.append([left_limit2,left_limit2])
 
-			elif temp_right_limit < western_limit:
+		# 	elif temp_right_limit < western_limit:
 
-				left_limit1 = ra_offset + temp_right_limit
-				right_limit1 = western_limit
+		# 		left_limit1 = ra_offset + temp_right_limit
+		# 		right_limit1 = western_limit
 
-				left_limit2 = eastern_limit
-				right_limit2 = eastern_limit + temp_right_limit
+		# 		left_limit2 = eastern_limit
+		# 		right_limit2 = eastern_limit + temp_right_limit
 
-				ra_bounds.append([left_limit1,left_limit1])
-				ra_bounds.append([left_limit2,left_limit2])
+		# 		ra_bounds.append([left_limit1,left_limit1])
+		# 		ra_bounds.append([left_limit2,left_limit2])
 
-			else:
-				ra_bounds.append([temp_left_limit,temp_right_limit])
+		# 	else:
+		# 		ra_bounds.append([temp_left_limit,temp_right_limit])
 
-			dec_indices = []
-			ra_indices = []
+		# 	dec_indices = []
+		# 	ra_indices = []
 
-			for b in dec_bounds:
-				dec_indices += list(pix_index_by_dec[np.where((pix_dec_by_dec < b[0]) & 
-															 (pix_dec_by_dec >= b[1]))[0]])
-			if len(dec_bounds) > 0:        
-				for b in ra_bounds:
-					ra_indices += list(pix_index_by_ra[np.where((pix_ra_by_ra < b[0]) & 
-															   (pix_ra_by_ra >= b[1]))[0]])
+		# 	for b in dec_bounds:
+		# 		dec_indices += list(pix_index_by_dec[np.where((pix_dec_by_dec < b[0]) & 
+		# 													 (pix_dec_by_dec >= b[1]))[0]])
+		# 	if len(dec_bounds) > 0:        
+		# 		for b in ra_bounds:
+		# 			ra_indices += list(pix_index_by_ra[np.where((pix_ra_by_ra < b[0]) & 
+		# 													   (pix_ra_by_ra >= b[1]))[0]])
 
-			common = set(dec_indices).intersection(set(ra_indices))
-			if len(common) > 0:
-				good_tiles.append(Tile(coord.SkyCoord(t[0],t[1],
-					unit=(u.deg,u.deg)), rescale_detector.deg_width, rescale_detector.deg_height, unpacked_healpix.nside))
+		# 	common = set(dec_indices).intersection(set(ra_indices))
+		# 	if len(common) > 0:
+		# 		good_tiles.append(Tile(coord.SkyCoord(t[0],t[1],
+		# 			unit=(u.deg,u.deg)), rescale_detector.deg_width, rescale_detector.deg_height, unpacked_healpix.nside))
 
 		
-		cum_prob = 0.0
-			
+		# Get good tiles
+		pix_coords = [(p.coord.ra.degree, p.coord.dec.degree) for p in rescaled_pixels_90]
+		sorted_pix_coords = sorted(pix_coords, key=lambda p: (p[0], p[1]))
+		tree = spatial.KDTree(sorted_pix_coords)
+		threshold = np.sqrt(rescale_detector.deg_height**2 + rescale_detector.deg_width**2)/2.0
+
+		r = tree.query(all_sky_coords)
+		good_indices = np.where(r[0] <= threshold)[0]
+
+		all_sky_coords_arr = np.asarray(all_sky_coords)
+		good_coords = all_sky_coords_arr[good_indices]
+
+		for gc in good_coords:
+			t = Tile(coord.SkyCoord(gc[0], gc[1], unit=(u.deg,u.deg)), rescale_detector.deg_width, rescale_detector.deg_height, unpacked_healpix.nside)
+			good_tiles.append(t)
+
+		
+		# Parallelize initialization of good tiles
 		manager = mp.Manager()
 		q = manager.Queue()
 		pool = mp.Pool()
-		# result = pool.map_async(invoke_enclosed_pix, [(g, q) for g in good_tiles])
+		
 		iterable_gts = [(g, q) for g in good_tiles]
-		result = pool.map(invoke_enclosed_pix, iterable_gts, 1000)
+		result = pool.map_async(invoke_enclosed_pix, iterable_gts)
 		# pool.close()
 		# pool.join()
 
@@ -568,18 +586,20 @@ class Cartographer:
 		# time.sleep(180)
 		# print("...back!")
 
-		new_tiles = []
+		initialized_tiles = []
 		while not q.empty():
-			new_tiles.append(q.get())
+			initialized_tiles.append(q.get())
 
-		print("Number of new tiles: %s" % len(new_tiles))
+		# print("Number of new tiles: %s" % len(new_tiles))
 		# raise("Breaking execution")
 
 		
+
+		cum_prob = 0.0
 		# for t in good_tiles:
 		# 	t.net_prob = np.sum(unpacked_healpix.prob[t.enclosed_pixel_indices])
 		# 	cum_prob += t.net_prob
-		for t in new_tiles:
+		for t in initialized_tiles:
 			t.net_prob = np.sum(unpacked_healpix.prob[t.enclosed_pixel_indices])
 			cum_prob += t.net_prob
 		
