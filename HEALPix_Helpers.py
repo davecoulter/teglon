@@ -559,7 +559,7 @@ class Cartographer:
 		pix_coords = [(p.coord.ra.degree, p.coord.dec.degree) for p in rescaled_pixels_90]
 		sorted_pix_coords = sorted(pix_coords, key=lambda p: (p[0], p[1]))
 		tree = spatial.KDTree(sorted_pix_coords)
-		threshold = np.sqrt(rescale_detector.deg_height**2 + rescale_detector.deg_width**2)/2.0
+		threshold = np.sqrt(rescale_detector.deg_height**2 + rescale_detector.deg_width**2)
 
 		r = tree.query(all_sky_coords)
 		good_indices = np.where(r[0] <= threshold)[0]
@@ -578,9 +578,9 @@ class Cartographer:
 		pool = mp.Pool()
 		
 		iterable_gts = [(g, q) for g in good_tiles]
-		result = pool.map_async(invoke_enclosed_pix, iterable_gts)
-		# pool.close()
-		# pool.join()
+		result = pool.map_async(invoke_enclosed_pix, iterable_gts, chunksize=500)
+		pool.close()
+		pool.join()
 
 		# print("sleep for 180s...")
 		# time.sleep(180)
