@@ -228,7 +228,8 @@ class GTT:
 											nside, 
 											npix, 
 											area_per_px, 
-											linestyle="-")
+											linestyle="-",
+											compute_contours=False)
 
 		num_50 = len(unpacked_healpix.indices_of_50)
 		num_90 = len(unpacked_healpix.indices_of_90)
@@ -252,7 +253,7 @@ class GTT:
 			max_pixel.coord.ra.degree, 
 			max_pixel.coord.dec.degree)
 
-		base_cartography = Cartographer(self.options.gw_id, unpacked_healpix, detector, detector_all_sky_coords)
+		base_cartography = Cartographer(self.options.gw_id, unpacked_healpix, detector, detector_all_sky_coords, generate_tiles=False)
 
 
 		# Save cartograpy
@@ -262,7 +263,7 @@ class GTT:
 
 		# Generate SQL query
 		sql_pixel_size = Detector("sql_pixel", 5.0, 5.0) # 5 degrees on a side
-		sql_tile_size = Detector("sql_tile", 10.0, 10.0) # 10 degrees in arcseconds
+		sql_tile_size = Detector("sql_tile", 8.0, 8.0) # 10 degrees on a side
 		
 
 		# Generate all sky coords for the large SQL tiles
@@ -370,18 +371,20 @@ class GTT:
 		catalog_completeness = GLADE_completeness(avg_dist)
 		print("Completeness: %s" % catalog_completeness)
 
-		working_galaxies = copy.deepcopy(contained_galaxies)
+		# working_galaxies = copy.deepcopy(contained_galaxies)
 			
 		print("Assigning relative prob...")
 		Cartographer.assign_galaxy_relative_prob(base_cartography.unpacked_healpix, 
-												 working_galaxies,
+												 contained_galaxies,
+												 # working_galaxies,
 												 sql_tile_cartography.cumlative_prob_in_tiles,
 												 catalog_completeness)
 
 
 		print("Redistribute prob...")
 		redistributed_map = Cartographer.redistribute_probability(base_cartography.unpacked_healpix,
-																  working_galaxies, 
+																  contained_galaxies,
+																  # working_galaxies, 
 																  sql_tile_cartography.tiles,
 																  catalog_completeness)
 

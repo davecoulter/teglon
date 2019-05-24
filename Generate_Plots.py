@@ -213,6 +213,14 @@ class GTT:
 			redistributed_cartography = pickle.load(handle)
 
 
+		# In case you want to plot contours...
+		print("Computing contours for '%s'...\n" % base_cartography.unpacked_healpix.file_name)
+		base_cartography.unpacked_healpix.compute_contours()
+
+		print("Computing contours for '%s'...\n" % redistributed_cartography.unpacked_healpix.file_name)
+		redistributed_cartography.unpacked_healpix.compute_contours()
+
+
 
 		# # Thacher
 		# thacher_tiles = []
