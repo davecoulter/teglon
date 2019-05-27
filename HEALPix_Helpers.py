@@ -162,6 +162,11 @@ def invoke_enclosed_pix(tile):
     tile.enclosed_pixel_indices
     return tile
 
+def find_nearest(array, value):
+	array = np.asarray(array)
+	idx = (np.abs(array - value)).argmin()
+	return idx
+
 class Cartographer:
 
 	def downsample_map(detector, unpacked_healpix):
@@ -277,11 +282,6 @@ class Cartographer:
 				current_ra -= (fov_fraction * detector.deg_width)/np.abs(np.cos(np.radians(d)))
 
 			ras_over_decs.append(ras)
-
-		def find_nearest(array, value):
-			array = np.asarray(array)
-			idx = (np.abs(array - value)).argmin()
-			return idx
 
 		print("All Sky statistics for %s..." % detector.name)
 		print("\tNum of dec strips: %s" % len(decs))
@@ -447,6 +447,39 @@ class Cartographer:
 
 		return redistributed_unpacked_healpix
 
+	def redistribute_probability_2(unpacked_healpix, galaxies, tiles, completeness):
+		
+		t1 = time.time()
+
+		# Copy probability
+		redistributed_prob = copy.deepcopy(unpacked_healpix.prob)
+		
+		# Compliment of completeness stays in the pixels
+		rescale_factor = 1.0 - completeness
+		print("Rescale factor: %s" % rescale_factor)
+
+		# Get unique list of pixels enclosed pix in tiles...
+		all_pix = []
+		for t in tiles:
+			all_pix += list(t.enclosed_pixel_indices)
+		unique_pix = np.asarray(list(set(all_pix)))
+
+		# Rescale those pixels...
+		redistributed_prob[unique_pix] = redistributed_prob[unique_pix]*rescale_factor
+
+		# Distribute each galaxy's probability over the number of pixels bounded by the galaxy radius
+		# These fractional probabilities get added on top of the field probability in the pixels
+		for g in galaxies:    
+			redistributed_prob[np.asarray(g.enclosed_pix)] += g.relative_prob/len(g.enclosed_pix)        
+		
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`redistribute_probability` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
+
+		return redistributed_prob[unpacked_healpix.indices_of_90]
+
 	def generate_tiles(unpacked_healpix, rescaled_pixels_90, rescale_detector, all_sky_coords, fudge_factor=0.75):
 			
 
@@ -485,10 +518,6 @@ class Cartographer:
 		manager = mp.Manager()
 		pool = mp.Pool()
 
-		# initialized_tiles = []
-		# for result in pool.imap_unordered(invoke_enclosed_pix, good_tiles):
-		# 	initialized_tiles.append(result)
-
 		initialized_tiles = pool.map(invoke_enclosed_pix, good_tiles)
 
 		cum_prob = 0.0
@@ -504,7 +533,37 @@ class Cartographer:
 		# return cum_prob, good_tiles
 		return cum_prob, initialized_tiles
 
-	def __init__(self, gwid, unpacked_healpix, rescale_detector, all_sky_coords, generate_tiles=True):
+	def assign_tiles(self, input_tiles):
+		t1 = time.time()
+
+		
+		for t in input_tiles:
+			t.net_prob = np.sum(self.unpacked_healpix.prob[t.enclosed_pixel_indices])
+
+
+		sorted_tiles = sorted(input_tiles, key=lambda x: x.net_prob, reverse=True)
+
+		cum_prob = 0.0
+		tile_sub_set = []
+		i = 0
+		while cum_prob <= 0.90 and i < len(sorted_tiles):
+			tile_sub_set.append(sorted_tiles[i])
+			cum_prob += sorted_tiles[i].net_prob
+			i += 1
+
+		self.tiles = tile_sub_set
+		self.cumlative_prob_in_tiles = cum_prob
+		print("Total tiles for %s in `%s`: %s" % (self.rescale_detector.name, self.unpacked_healpix.file_name, len(self.tiles)))
+		print("Sanity check: Cumulative prob in tiles based on non-scaled pixels close to 0.90? Cumulate Prob = %s" % self.cumlative_prob_in_tiles)
+
+		t2 = time.time()
+		print("\n********* start DEBUG ***********")
+		print("`generate_tiles.assign_tiles` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
+
+
+
+	def __init__(self, gwid, unpacked_healpix, rescale_detector, all_sky_coords, generate_tiles=True, downsample_map=True):
 		
 		self.gwid = gwid
 		self.unpacked_healpix = unpacked_healpix
@@ -513,14 +572,18 @@ class Cartographer:
 		self.tiles = None
 		self.cumlative_prob_in_tiles = 0.0
 
-		# for t in telescopes:
-		print("Rescaling %s for %s" % (unpacked_healpix.file_name, rescale_detector.name))
-		rescaled_healpix = Cartographer.downsample_map(self.rescale_detector, self.unpacked_healpix)
+		if downsample_map:
 
-		
-		# Debug
-		total_prob_rescaled_pixels_90 = np.sum([p.prob for p in rescaled_healpix.pixels_90])
-		print("Sanity check: Sum of probability in 90th percentile, rescaled pix? Sum = %s" % total_prob_rescaled_pixels_90)
+			print("Rescaling %s for %s" % (unpacked_healpix.file_name, rescale_detector.name))
+			rescaled_healpix = Cartographer.downsample_map(self.rescale_detector, self.unpacked_healpix)
+
+			
+			# Debug
+			total_prob_rescaled_pixels_90 = np.sum([p.prob for p in rescaled_healpix.pixels_90])
+			print("Sanity check: Sum of probability in 90th percentile, rescaled pix? Sum = %s" % total_prob_rescaled_pixels_90)
+		else:
+			print("Not rescaling map...")
+
 
 		if generate_tiles:
 			print("Using all sky coords + rescaled pixels to generate tile set...")
@@ -539,9 +602,7 @@ class Cartographer:
 
 class glade_galaxy:
 	
-	cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
-
-	def __init__(self, db_result, unpacked_healpix):
+	def __init__(self, db_result, unpacked_healpix, cosmo, distance_cutoff, proper_radius_kpc):
 		self.ID = int(db_result[0])
 		self.Galaxy_id = int(db_result[1])
 		self.Distance_id = int(db_result[2])
@@ -560,59 +621,74 @@ class glade_galaxy:
 		self.RA = g_ra
 		
 		self.Dec = float(db_result[9]) if db_result[9] is not None else db_result[9]
-		self.dist = float(db_result[10]) if db_result[10] is not None else db_result[10]
-		# self.Dec = float(db_result[7]) if db_result[7] is not '' else db_result[7]
-		# self.dist = float(db_result[8]) if db_result[8] is not '' else db_result[8]
-		
-		# Compute cosmological parameters:
-		# self.dist_obj = Distance(self.dist, u.Mpc)
-		# self.proper_radius = 20 # kpc - a hack
-		# self.angular_radius_deg = self.proper_radius*(glade_galaxy.cosmo.arcsec_per_kpc_proper(self.dist_obj.z)).value/3600.
-		# self.area = np.pi * self.angular_radius_deg**2 
-		
-		# c1 = Point(self.RA, self.Dec).buffer(self.angular_radius_deg)
-		# c2 = shapely_transform(lambda x,y,z=None: ((self.RA - (self.RA - x)/np.abs(np.cos(np.radians(y)))), 
-												   # y), c1)
-		
-		# self.polygon_coords = c2.exterior.coords
+		# db_result[10] == MySQL POINT object...
+		self.dist = float(db_result[11]) if db_result[11] is not None else db_result[11]
+
+
+
 		
 		theta = 0.5 * np.pi - np.deg2rad(self.Dec)
 		phi = np.deg2rad(self.RA)
 		self.pixel_index = hp.ang2pix(unpacked_healpix.nside, theta, phi)
 		
+		
+		self.dist_err = float(db_result[12]) if db_result[12] is not None else db_result[12]
+		self.z_dist = float(db_result[13]) if db_result[13] is not None else db_result[13]
+		self.z_dist_err = float(db_result[14]) if db_result[14] is not None else db_result[14]
+		self.z = float(db_result[15]) if db_result[15] is not None else db_result[15]
+
+
+		
 		self.enclosed_pix = []
-		# if self.area > unpacked_healpix.area_per_px:
-		
-		# 	# Get all enclosed pix
-		# 	xyz_vertices = []
-		# 	for c in self.polygon_coords:
-		# 		theta = 0.5 * np.pi - np.deg2rad(c[1])
-		# 		phi = np.deg2rad(c[0])
-		# 		xyz_vertices.append(hp.ang2vec(theta, phi))
+		self.polygon_coords = []
+
+		# Compute cosmological parameters:
+		# if self.z_dist <= distance_cutoff:
+
+		# 	try:
+
+		# 		angular_radius_deg = proper_radius_kpc*(cosmo.arcsec_per_kpc_proper(self.z)).value/3600.
+		# 		c1 = Point(self.RA, self.Dec).buffer(angular_radius_deg)
+		# 		c2 = shapely_transform(lambda x,y,z=None: ((self.RA - (self.RA - x)/np.abs(np.cos(np.radians(y)))), 
+		# 												   y), c1)
+		# 		self.polygon_coords = c2.exterior.coords
+
+		# 		# Get all enclosed pix
+		# 		xyz_vertices = []
+		# 		for c in self.polygon_coords:
+					
+		# 			theta = (0.5 * np.pi - np.deg2rad(c[1])) % np.pi
+		# 			phi = np.deg2rad(c[0]) % (2.0*np.pi)
+
+		# 			xyz_vertices.append(hp.ang2vec(theta, phi))
+				
+		# 		internal_pix = hp.query_polygon(unpacked_healpix.nside, xyz_vertices[0:-2], inclusive=False)            
+		# 		self.enclosed_pix = list(internal_pix)
+
+		# 		print("z dist: %s; # of enclosed: %s" % (self.z_dist, len(self.enclosed_pix)))
+		# 	except:
+		# 		print("Theta too large!")
+		# 	finally:
+		# 		self.enclosed_pix.append(self.pixel_index)
 			
-		# 	internal_pix = hp.query_polygon(unpacked_healpix.nside, xyz_vertices[0:-2], inclusive=False)            
-		# 	self.enclosed_pix += list(internal_pix)
-		
 		# else:
 		# 	self.enclosed_pix.append(self.pixel_index)
+
 		self.enclosed_pix.append(self.pixel_index)
 		
-		self.dist_err = float(db_result[11]) if db_result[11] is not None else db_result[11]
-		self.z_dist = float(db_result[12]) if db_result[12] is not None else db_result[12]
-		self.z_dist_err = float(db_result[13]) if db_result[13] is not None else db_result[13]
-		self.z = float(db_result[14]) if db_result[14] is not None else db_result[14]
-		self.B = float(db_result[15]) if db_result[15] is not None else db_result[15]
-		self.B_err = float(db_result[16]) if db_result[16] is not None else db_result[16]
-		self.B_abs = float(db_result[17]) if db_result[17] is not None else db_result[17]
-		self.J = float(db_result[18]) if db_result[18] is not None else db_result[18]
-		self.J_err = float(db_result[19]) if db_result[19] is not None else db_result[19]
-		self.H = float(db_result[20]) if db_result[20] is not None else db_result[20]
-		self.H_err = float(db_result[21]) if db_result[21] is not None else db_result[21]
-		self.K = float(db_result[22]) if db_result[22] is not None else db_result[22]
-		self.K_err = float(db_result[23]) if db_result[23] is not None else db_result[23]
-		self.flag1 = db_result[24]
-		self.flag2 = db_result[25]
-		self.flag3 = db_result[26]
+
+		self.B = float(db_result[16]) if db_result[16] is not None else db_result[16]
+		self.B_err = float(db_result[17]) if db_result[17] is not None else db_result[17]
+		self.B_abs = float(db_result[18]) if db_result[18] is not None else db_result[18]
+		self.J = float(db_result[19]) if db_result[19] is not None else db_result[19]
+		self.J_err = float(db_result[20]) if db_result[20] is not None else db_result[20]
+		self.H = float(db_result[21]) if db_result[21] is not None else db_result[21]
+		self.H_err = float(db_result[22]) if db_result[22] is not None else db_result[22]
+		self.K = float(db_result[23]) if db_result[23] is not None else db_result[23]
+		self.K_err = float(db_result[24]) if db_result[24] is not None else db_result[24]
+		self.flag1 = db_result[25]
+		self.flag2 = db_result[26]
+		self.flag3 = db_result[27]
 
 		# self.B_lum_proxy = (self.dist**2)*10**(-0.4*self.B)
 		self.B_lum_proxy = (self.z_dist**2)*10**(-0.4*self.B)
@@ -620,15 +696,42 @@ class glade_galaxy:
 
 		self.galaxy_glade_completeness = -999
 		
-	def plot(self, bmap, ax_to_plot, **kwargs):
+
+
+	def plot(self, bmap, ax_to_plot, unpacked_healpix, **kwargs):
 		
-		cra_deg, cdec_deg = zip(*[(coord_deg[0], coord_deg[1]) 
+		if len(self.polygon_coords) > 0:
+
+			cra_deg, cdec_deg = zip(*[(coord_deg[0], coord_deg[1]) 
 						  for coord_deg in self.polygon_coords])
 	
-		cx,cy = bmap(cra_deg,cdec_deg)
-		clat_lons = np.vstack([cx,cy]).transpose()
-		ax_to_plot.add_patch(Polygon(clat_lons, **kwargs))
-			
+			cx,cy = bmap(cra_deg,cdec_deg)
+			clat_lons = np.vstack([cx,cy]).transpose()
+			ax_to_plot.add_patch(Polygon(clat_lons, **kwargs))
+
+		else:
+
+			if self.relative_prob < 1e-8:
+				fc='k'
+				ec='None'
+				alph = 0.1
+			else:
+				fc='None'
+				ec='k'
+				alph = 1.0
+
+			c = coord.SkyCoord(self.RA, self.Dec, unit=(u.deg, u.deg))
+			pe = Pixel_Element(self.pixel_index, unpacked_healpix.nside, unpacked_healpix.prob[self.pixel_index])
+			pe.plot(bmap, ax_to_plot, facecolor=fc, edgecolor=ec, linewidth=0.1, alpha=alph, zorder=9500)
+
+			# x,y = bmap(c.ra.degree, c.dec.degree)
+
+			# ms = kwargs.get('ms',"0.01")
+			# if self.relative_prob < 1e-8:
+			# 	bmap.plot(x, y, 'k.', markersize=ms, mfc='None', alpha=0.5)
+			# else:
+			# 	bmap.plot(x, y, 'r.', markersize=ms, mfc='r',alpha=1)
+		
 
 	def __repr__(self):
 		return pprint.pformat(vars(self), indent=4, width=1)

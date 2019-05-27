@@ -59,6 +59,9 @@ import pytz as pytz
 from matplotlib.patches import CirclePolygon
 from shapely.ops import transform as shapely_transform
 from shapely.geometry import Point
+from shapely.ops import unary_union
+from shapely.geometry import JOIN_STYLE
+
 
 from astropy import cosmology
 from astropy.cosmology import WMAP5, WMAP7, LambdaCDM
@@ -187,25 +190,28 @@ class GTT:
 		with open('%s/%s_base_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
 			base_cartography = pickle.load(handle)
 
-		print("Loading sql pixel map...")
-		sql_pixel_map = None
-		with open('%s/%s_sql_pixel_map.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-			sql_pixel_map = pickle.load(handle)
+		# print("Loading sql pixel map...")
+		# sql_pixel_map = None
+		# with open('%s/%s_sql_pixel_map.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
+		# 	sql_pixel_map = pickle.load(handle)
 
-		print("Loading sql cartography...")
-		sql_tile_cartography = None
-		with open('%s/%s_sql_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-			sql_tile_cartography = pickle.load(handle)
+		# print("Loading sql cartography...")
+		# sql_tile_cartography = None
+		# with open('%s/%s_sql_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
+		# 	sql_tile_cartography = pickle.load(handle)
 
-		print("Loading galaxy query...")
-		query = None
-		with open('%s/%s_query.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-			query = pickle.load(handle)
+		# print("Loading galaxy query...")
+		# query = None
+		# with open('%s/%s_query.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
+		# 	query = pickle.load(handle)
 
 		print("Loading contained galaxies...")
 		contained_galaxies = None
 		with open('%s/%s_contained_galaxies.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
 			contained_galaxies = pickle.load(handle)
+
+		# for g in (sorted(contained_galaxies, key=lambda x: x.relative_prob, reverse=True))[:99]:
+		# 	print(g.relative_prob)
 
 		print("Loading redistributed cartography...")
 		redistributed_cartography = None
@@ -306,14 +312,39 @@ class GTT:
 		# 	print("Done")
 
 
-		plot_probability_map("%s/%s_SQL_Tiles" % (self.options.working_dir, self.options.gw_id),
-					 pixels=sql_pixel_map.pixels_90,
-					 tiles=sql_tile_cartography.tiles, 
-					 colormap=plt.cm.viridis)
+		test = []
+		for t in base_cartography.tiles:
+			test.append(t.polygon)
+
+		# print("here")
+		# print(list(test[0].exterior.coords))
+		# print("\n\n")
+
+		test2 = unary_union(test)
+		# print(type(test2))
+
+		
+		eps = 0.00001
+		test3 = test2.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+
+
+		# plot_probability_map("%s/%s_SQL_Pixels" % (self.options.working_dir, self.options.gw_id),
+		# 			 pixels_filled=base_cartography.unpacked_healpix.pixels_90,
+		# 			 # tiles=base_cartography.tiles,
+		# 			 # pixels_empty=base_cartography.unpacked_healpix.pixels_90,
+		# 			 colormap=plt.cm.viridis,
+		# 			 linear_rings=test3)
+
+
+
 
 		plot_probability_map("%s/%s_%s_Redistributed_90th_Tiles" % (self.options.working_dir, self.options.gw_id, detector.name),
-					 pixels=redistributed_cartography.unpacked_healpix.pixels_90,
-					 tiles=redistributed_cartography.tiles)
+					 pixels_filled=redistributed_cartography.unpacked_healpix.pixels_90,
+					 galaxies=contained_galaxies,
+					 tiles=redistributed_cartography.tiles,
+					 linear_rings=test3,
+					 healpix_obj_for_contours=base_cartography.unpacked_healpix
+					 )
 
 
 		# plot_probability_map_2("%s/%s_%s_Redistributed_90th_Tiles" % (self.options.working_dir, self.options.gw_id, detector.name),

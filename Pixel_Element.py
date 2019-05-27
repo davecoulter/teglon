@@ -19,6 +19,8 @@ class Pixel_Element:
         self.__coord = None
         self.__polygon = None
         self.__prob = prob
+
+        self.__epi = np.array([])
         
     
     @property
@@ -58,6 +60,22 @@ class Pixel_Element:
             self.__polygon = geometry.Polygon(pixel_radian_vertices)
             
         return self.__polygon
+
+
+    def enclosed_pixel_indices(self, nside_out):
+
+        # Sanity
+        if nside_out < self.nside:
+            raise("Can't get enclosed pixel indices for lower resolution pixels!")
+        
+        if len(self.__epi) == 0:
+            pixel_xyz_vertices = hp.boundaries(self.nside, pix=self.index)
+            internal_pix = hp.query_polygon(nside_out, pixel_xyz_vertices, inclusive=False)
+            self.__epi = internal_pix
+            
+        return self.__epi
+
+
     
     def update_polygon(self, polygon):
         self.__polygon = polygon

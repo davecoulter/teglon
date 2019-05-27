@@ -57,6 +57,8 @@ import pytz as pytz
 from matplotlib.patches import CirclePolygon
 from shapely.ops import transform as shapely_transform
 from shapely.geometry import Point
+from shapely.ops import unary_union
+from shapely.geometry import JOIN_STYLE
 
 from astropy import cosmology
 from astropy.cosmology import WMAP5, WMAP7, LambdaCDM
@@ -253,7 +255,7 @@ class GTT:
 			max_pixel.coord.ra.degree, 
 			max_pixel.coord.dec.degree)
 
-		base_cartography = Cartographer(self.options.gw_id, unpacked_healpix, detector, detector_all_sky_coords, generate_tiles=False)
+		base_cartography = Cartographer(self.options.gw_id, unpacked_healpix, detector, detector_all_sky_coords, generate_tiles=True)
 
 
 		# Save cartograpy
@@ -262,38 +264,41 @@ class GTT:
 
 
 		# Generate SQL query
-		sql_pixel_size = Detector("sql_pixel", 5.0, 5.0) # 5 degrees on a side
-		sql_tile_size = Detector("sql_tile", 8.0, 8.0) # 10 degrees on a side
+		# sql_pixel_size = Detector("sql_pixel", 5.0, 5.0) # 5 degrees on a side
+		# sql_tile_size = Detector("sql_tile", 8.0, 8.0) # 10 degrees on a side
 		
 
 		# Generate all sky coords for the large SQL tiles
-		print("Generating all sky coords for %s" % sql_tile_size.name)
-		sql_tile_all_sky_coords = Cartographer.generate_all_sky_coords(sql_tile_size, 
-																	   max_pixel.coord.ra.degree, 
-																	   max_pixel.coord.dec.degree)
+		# print("Generating all sky coords for %s" % sql_tile_size.name)
+		# sql_tile_all_sky_coords = Cartographer.generate_all_sky_coords(sql_tile_size, 
+		# 															   max_pixel.coord.ra.degree, 
+		# 															   max_pixel.coord.dec.degree)
 
-		# Generate a more granular sampling of the healpix with the sql_pixel_size
-		sql_tile_cartography = Cartographer(self.options.gw_id, 
-													 unpacked_healpix, 
-													 sql_tile_size, 
-													 sql_tile_all_sky_coords, 
-													 generate_tiles=False)
+		# # Generate a more granular sampling of the healpix with the sql_pixel_size
+		# sql_tile_cartography = Cartographer(self.options.gw_id, 
+		# 											 unpacked_healpix, 
+		# 											 sql_tile_size, 
+		# 											 sql_tile_all_sky_coords, 
+		# 											 generate_tiles=False)
 
-		sql_pixel_map = Cartographer.downsample_map(sql_pixel_size, unpacked_healpix)
-		sql_prob, sql_tiles = Cartographer.generate_tiles(unpacked_healpix, 
-														  sql_pixel_map.pixels_90, 
-														  sql_tile_size, 
-														  sql_tile_all_sky_coords)
+		# sql_pixel_map = Cartographer.downsample_map(sql_pixel_size, unpacked_healpix)
+		# sql_prob, sql_tiles = Cartographer.generate_tiles(unpacked_healpix, 
+		# 												  sql_pixel_map.pixels_90, 
+		# 												  sql_tile_size, 
+		# 												  sql_tile_all_sky_coords)
 
-		sql_tile_cartography.tiles = sql_tiles
-		sql_tile_cartography.cumlative_prob_in_tiles = sql_prob
+		# cumlative_prob_in_sql_pixels = np.sum([p.prob for p in base_cartography.unpacked_healpix.pixels_90])
+		# cumlative_prob_in_sql_pixels = np.sum([p.prob for p in sql_pixel_map.pixels_90])
+
+		# sql_tile_cartography.tiles = sql_tiles
+		# sql_tile_cartography.cumlative_prob_in_tiles = sql_prob
 
 		# Save cartograpy
-		with open('%s/%s_sql_pixel_map.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
-			pickle.dump(sql_pixel_map, handle, protocol=pickle.HIGHEST_PROTOCOL)
+		# with open('%s/%s_sql_pixel_map.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
+		# 	pickle.dump(sql_pixel_map, handle, protocol=pickle.HIGHEST_PROTOCOL)
 			
-		with open('%s/%s_sql_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
-			pickle.dump(sql_tile_cartography, handle, protocol=pickle.HIGHEST_PROTOCOL)
+		# with open('%s/%s_sql_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
+		# 	pickle.dump(sql_tile_cartography, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
 
 		# # if debug
@@ -305,39 +310,103 @@ class GTT:
 
 		t1 = time.time()
 
-		ra_between = []
-		dec_between = []
+		# print("\nSQL Pixels in %s: %s" % (self.options.gw_id, len(sql_pixel_map.pixels_90)))
+		# print("Cumlative prob in SQL Pixels: %s\n" % cumlative_prob_in_sql_pixels)
 
-		for t in sql_tile_cartography.tiles:
+		print("\nTiles in %s: %s" % (self.options.gw_id, len(base_cartography.tiles)))
+		print("Cumlative prob: %s\n" % base_cartography.cumlative_prob_in_tiles)
 
-			ra_min = np.min([c.ra.degree for c in t.corner_coords])
-			ra_min = ra_min + 360.0 if ra_min < 0 else ra_min
 
-			ra_max = np.max([c.ra.degree for c in t.corner_coords])
-			ra_max = ra_max + 360.0 if ra_max < 0 else ra_max
+		multipolygon = []
+		# for p in sql_pixel_map.pixels_90:
+		# for t in base_cartography.tiles:
+		# 	mp = "(("
+		# 	ra_deg,dec_deg = zip(*[(np.degrees(coord_rad[0]), np.degrees(coord_rad[1])) 
+		# 		for coord_rad in t.polygon.exterior.coords])
+		# 	for i in range(len(ra_deg)):
+		# 		mp += "%s %s," % (ra_deg[i], dec_deg[i])
+		# 	mp = mp[:-1] # trim the last ","
+		# 	mp += ")),"
+		# 	multipolygon.append(mp)
 
-			dec_min = np.min([c.dec.degree for c in t.corner_coords])
-			dec_max = np.max([c.dec.degree for c in t.corner_coords])
+		test = []
+		for t in base_cartography.tiles:
+			test.append(t.polygon)
 
-			ra_between.append((ra_min, ra_max))
-			dec_between.append((dec_min, dec_max))
+		test2 = unary_union(test)
+		
+		eps = 0.00001
+		test3 = test2.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
 
-		print("Tiles in %s: %s" % (sql_tile_cartography.gwid, 
-								   len(sql_tile_cartography.tiles)))
+		print("Number of sub-polygons in query: %s" % len(test3))
+		# for p in sql_pixel_map.pixels_90:
+		for t in test3:
+			mp = "(("
+			ra_deg,dec_deg = zip(*[(np.degrees(coord_rad[0]), np.degrees(coord_rad[1])) 
+				for coord_rad in t.exterior.coords])
+			for i in range(len(ra_deg)):
+				mp += "%s %s," % (ra_deg[i], dec_deg[i])
+			mp = mp[:-1] # trim the last ","
+			mp += ")),"
+			multipolygon.append(mp)
 
-		query = "SELECT * from GalaxyDistance WHERE\n("
 
-		for i,ra in enumerate(ra_between):
-			query += "(RA BETWEEN %0.5f AND %0.5f AND _Dec BETWEEN %0.5f AND %0.5f)" % (ra_between[i][0],
-																				   ra_between[i][1],
-																				   dec_between[i][0],
-																				   dec_between[i][1])
-			if (i+1) < len(ra_between):
-				query += " OR\n"
-			else:
-				query += ")\n"
+		# create multipolygon WHERE clause
+		multipolygon[-1] = multipolygon[-1][:-1] # trim the last "," from the last object
+		mp_where = "ST_WITHIN(Coord, ST_GEOMFROMTEXT('MultiPolygon("
+		for mp in multipolygon:
+			mp_where += mp
+		mp_where += ")'));"
 
-		query += "AND z_dist IS NOT NULL AND z_dist_err IS NOT NULL AND B IS NOT NULL;"   
+
+		t2 = time.time()
+
+		print("\n********* start DEBUG ***********")
+		print("`Generating multipolygon` execution time: %s" % (t2 - t1))
+		print("********* end DEBUG ***********\n")
+
+		# ra_between = []
+		# dec_between = []
+
+		# for t in sql_tile_cartography.tiles:
+			
+		# 	ra_min = np.min([c.ra.degree for c in t.corner_coords])
+		# 	ra_min = ra_min + 360.0 if ra_min < 0 else ra_min
+
+		# 	ra_max = np.max([c.ra.degree for c in t.corner_coords])
+		# 	ra_max = ra_max + 360.0 if ra_max < 0 else ra_max
+
+		# 	dec_min = np.min([c.dec.degree for c in t.corner_coords])
+		# 	dec_max = np.max([c.dec.degree for c in t.corner_coords])
+
+		# 	ra_between.append((ra_min, ra_max))
+		# 	dec_between.append((dec_min, dec_max))
+
+
+		
+
+		# print("Tiles in %s: %s" % (sql_tile_cartography.gwid, 
+		# 						   len(sql_tile_cartography.tiles)))
+
+		# query = "SELECT * from GalaxyDistance2 WHERE\n("
+
+		# for i,ra in enumerate(ra_between):
+		# 	query += "(RA BETWEEN %0.5f AND %0.5f AND _Dec BETWEEN %0.5f AND %0.5f)" % (ra_between[i][0],
+		# 																		   ra_between[i][1],
+		# 																		   dec_between[i][0],
+		# 																		   dec_between[i][1])
+		# 	if (i+1) < len(ra_between):
+		# 		query += " OR\n"
+		# 	else:
+		# 		query += ")\n"
+
+		# query += "AND z_dist IS NOT NULL AND z_dist_err IS NOT NULL AND B IS NOT NULL;"   
+
+		t1 = time.time()
+
+		query = "SELECT * from GalaxyDistance2 WHERE z_dist IS NOT NULL AND z_dist_err IS NOT NULL AND B IS NOT NULL AND "
+		query += mp_where
+
 		print(query)
 		print("\n*****************************\n")
 
@@ -348,13 +417,6 @@ class GTT:
 
 		result = QueryDB(query, port=LOCAL_PORT)
 
-		contained_galaxies = []
-		for row in result:
-			g = glade_galaxy(row, base_cartography.unpacked_healpix)
-			contained_galaxies.append(g)
-
-		print("Query returned %s galaxies" % len(contained_galaxies))
-
 		t2 = time.time()
 
 		print("\n********* start DEBUG ***********")
@@ -363,9 +425,29 @@ class GTT:
 
 
 
-		# Save cartograpy
-		with open('%s/%s_contained_galaxies.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
-			pickle.dump(contained_galaxies, handle, protocol=pickle.HIGHEST_PROTOCOL)
+		contained_galaxies = []
+
+		# What is the angular radius for our given map?
+		cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
+		pixel_diameter_arcsec = np.degrees(pixel_radius_radian)*2.0*3600.0
+		proper_radius = 20.0 # kpc
+
+		z = np.linspace(1e-18,0.3,1000)
+		arcsec_of_proper_diam = cosmo.arcsec_per_kpc_proper(z)*proper_radius*2.0
+		z_index = find_nearest(arcsec_of_proper_diam, pixel_diameter_arcsec)
+		target_z = z[z_index]
+		dist_cuttoff = cosmo.luminosity_distance(target_z).value # Mpc
+
+		print("Redshift cutoff: %s" % target_z)
+		print("Distance cutoff: %s" % dist_cuttoff)
+
+		for row in result:
+			g = glade_galaxy(row, base_cartography.unpacked_healpix, cosmo, dist_cuttoff, proper_radius)
+			contained_galaxies.append(g)
+
+		print("Query returned %s galaxies" % len(contained_galaxies))
+
+		
 
 		avg_dist = average_distance_prior(base_cartography.unpacked_healpix)
 		catalog_completeness = GLADE_completeness(avg_dist)
@@ -377,22 +459,39 @@ class GTT:
 		Cartographer.assign_galaxy_relative_prob(base_cartography.unpacked_healpix, 
 												 contained_galaxies,
 												 # working_galaxies,
-												 sql_tile_cartography.cumlative_prob_in_tiles,
+												 # sql_tile_cartography.cumlative_prob_in_tiles,
+												 # cumlative_prob_in_sql_pixels,
+												 base_cartography.cumlative_prob_in_tiles,
 												 catalog_completeness)
 
 
+		# Save cartograpy
+		with open('%s/%s_contained_galaxies.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
+			pickle.dump(contained_galaxies, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
 		print("Redistribute prob...")
-		redistributed_map = Cartographer.redistribute_probability(base_cartography.unpacked_healpix,
+		# redistributed_map
+		redistributed_90 = Cartographer.redistribute_probability_2(base_cartography.unpacked_healpix,
 																  contained_galaxies,
 																  # working_galaxies, 
-																  sql_tile_cartography.tiles,
+																  # sql_tile_cartography.tiles,
+																  # sql_pixel_map.pixels_90,
+																  # base_cartography.unpacked_healpix.pixels_90,
+																  base_cartography.tiles,
 																  catalog_completeness)
 
 		# S190425z_swope_cartography = Cartographer("S190425z", unpacked_healpix, swope, swope_all_sky_coords)
-		redistributed_cartography = Cartographer("%s_%s" % (base_cartography.gwid, detector.name), 
-													redistributed_map, 
-													detector, 
-													detector_all_sky_coords)
+		# redistributed_cartography = Cartographer("%s_%s" % (base_cartography.gwid, detector.name), 
+		# 											redistributed_map, 
+		# 											detector, 
+		# 											detector_all_sky_coords,
+		# 											generate_tiles=False,
+		# 											downsample_map=False)
+		redistributed_cartography = base_cartography
+		redistributed_cartography.unpacked_healpix.prob[base_cartography.unpacked_healpix.indices_of_90] = redistributed_90
+
+		# We have already ...
+		redistributed_cartography.assign_tiles(base_cartography.tiles)
 
 		# Save cartograpy
 		with open('%s/%s_redstributed_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:

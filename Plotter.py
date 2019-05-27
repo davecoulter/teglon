@@ -6,24 +6,28 @@ from mpl_toolkits.basemap import Basemap
 from matplotlib import colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 import numpy as np
+from shapely import geometry
+from matplotlib.patches import Polygon
 
 
 
 def plot_probability_map(output_filename, 
 						 colormap=plt.cm.viridis, 
 						 healpix_obj_for_contours=None, 
-						 pixels=None,
+						 pixels_filled=None,
+						 pixels_empty=None,
 						 tiles=None, 
 						 galaxies=None, 
 						 completeness=None,
 						 net_prob=None,
 						 distance=None,
-						 empty_pixel=False,
-						 tile_set=None):
+						 # empty_pixel=False,
+						 tile_set=None,
+						 linear_rings=None):
 	
 	print("Plotting `%s`" % output_filename)
 	
-	fig = plt.figure(figsize=(30,30))
+	fig = plt.figure(figsize=(30,30), dpi=1000)
 	ax = fig.add_subplot(111)
 	
 #     # GW190425 - specific
@@ -39,57 +43,75 @@ def plot_probability_map(output_filename,
 	m = Basemap(projection='moll',lon_0=180.0)
 
 	
-	# Plot contours
-	if healpix_obj_for_contours:
-		print("Plotting Contours...")
-		cs_outline = m.contour(healpix_obj_for_contours.X,
-							   healpix_obj_for_contours.Y,
-							   healpix_obj_for_contours.Z,
-							   levels=healpix_obj_for_contours.levels,
-							   colors='orange',
-							   latlon=True,
-							   alpha=1.0,
-							   linestyles=healpix_obj_for_contours.linestyle,
-							   linewidths=1.0)
+	# # Plot contours
+	# if healpix_obj_for_contours:
+	# 	print("Plotting Contours...")
+	# 	cs_outline = m.contour(healpix_obj_for_contours.X,
+	# 						   healpix_obj_for_contours.Y,
+	# 						   healpix_obj_for_contours.Z,
+	# 						   levels=healpix_obj_for_contours.levels,
+	# 						   colors='orange',
+	# 						   latlon=True,
+	# 						   alpha=1.0,
+	# 						   linestyles=healpix_obj_for_contours.linestyle,
+	# 						   linewidths=1.0)
 	
 
 	# Plot pixels
-	if pixels:
-		print("Plotting Pixels...")
+	if pixels_filled:
+		print("Plotting `pixels_filled`...")
 		
-		if not empty_pixel:
-			# Scale colormap
-			pixels_probs = [p.prob for p in pixels]
-			min_prob = np.min(pixels_probs)
-			max_prob = np.max(pixels_probs)  
+		# Scale colormap
+		pixels_probs = [p.prob for p in pixels_filled]
+		min_prob = np.min(pixels_probs)
+		max_prob = np.max(pixels_probs)  
 
-			fracs = pixels_probs/max_prob
-			norm = colors.Normalize(fracs.min(), fracs.max())
+		fracs = pixels_probs/max_prob
+		norm = colors.Normalize(fracs.min(), fracs.max())
 
-			patches = []
-			values = []
-			for p in pixels:
-				patches.append(p.get_patch(m))
+		patches = []
+		values = []
+		for p in pixels_filled:
+			patches.append(p.get_patch(m))
 
-				pprob = p.prob
-				if p.prob <= 0.0:
-					pprob = 1e-18
-				values.append(pprob)
+			pprob = p.prob
+			if p.prob <= 0.0:
+				pprob = 1e-18
+			values.append(pprob)
 
 
-			patch_collection = mpl.collections.PatchCollection(np.asarray(patches), cmap=colormap, norm=colors.LogNorm(), alpha=0.75)
-			patch_collection.set_array(np.asarray(values))
-			ax.add_collection(patch_collection)
-			
-			
-		else:
-			for p in pixels:
-				p.plot(m, ax, edgecolor='k', facecolor='None', linewidth=0.25, alpha=0.35)
+		patch_collection = mpl.collections.PatchCollection(np.asarray(patches), cmap=colormap, norm=colors.LogNorm(), alpha=0.75, zorder=9900)
+		patch_collection.set_array(np.asarray(values))
+		ax.add_collection(patch_collection)
+		
+	if pixels_empty:
+		for p in pixels_empty:
+			p.plot(m, ax, edgecolor='k', facecolor='None', linewidth=0.25, alpha=1.0)
+
+
+
+	if linear_rings:
+		for lr in linear_rings:
+			# lrc = list(lr.coords)
+
+			# ra_deg,dec_deg = zip(*[(np.degrees(coord_rad[0]), np.degrees(coord_rad[1])) 
+			# 				   for coord_rad in lrc])
+
+			# x2,y2 = m(ra_deg,dec_deg)
+			# lat_lons = np.vstack([x2,y2]).transpose()
+			# patch = Polygon(lat_lons, linewidth=0.25,edgecolor='k', facecolor='None',zorder=9900)
+			# ax.add_patch(patch)
+			ra_deg,dec_deg = zip(*[(np.degrees(coord_rad[0]), np.degrees(coord_rad[1])) 
+							   for coord_rad in lr.exterior.coords])
+		
+			x,y = m(ra_deg,dec_deg)
+			lat_lons = np.vstack([x,y]).transpose()
+			ax.add_patch(Polygon(lat_lons, edgecolor='k', linewidth=0.35, facecolor='None',zorder=9000))
 	
 	if tiles:
 		print("Plotting Tiles...")
 		for t in tiles:
-			t.plot(m, ax, edgecolor='r', facecolor='None', linewidth=0.25, alpha=1.0,zorder=9999)
+			t.plot(m, ax, edgecolor='r', facecolor='None', linewidth=0.25, alpha=1.0,zorder=9300)
 	if tile_set:
 		for ts in tile_set:
 			print("Plotting Tiles: %s..." % ts[0])
@@ -99,7 +121,9 @@ def plot_probability_map(output_filename,
 	if galaxies:
 		print("Plotting Galaxies...")
 		for g in galaxies:
-			g.plot(m, ax, facecolor='None', edgecolor='crimson', linewidth=1.0)
+			g.plot(m, ax, healpix_obj_for_contours, facecolor='None', edgecolor='k', linewidth=0.1, zorder=9990) # ms=72.0/fig.dpi,
+
+	
 		
 
 #     # draw meridians
@@ -115,7 +139,7 @@ def plot_probability_map(output_filename,
 	m.drawmeridians(np.arange(-180.,181.,60.),labels=[False,False,False,False],dashes=[2,2],linewidth=0.5)
 
 	
-	if pixels and not empty_pixel:
+	if pixels_filled:  # and not empty_pixel
 		top_left = 0.95
 		delta_y = 0.04
 		
@@ -154,7 +178,7 @@ def plot_probability_map(output_filename,
 
 	ax.invert_xaxis()
 	
-	fig.savefig('%s.png' % output_filename,bbox_inches='tight',dpi=280)
+	fig.savefig('%s.png' % output_filename,bbox_inches='tight') #,dpi=840
 	plt.close('all')
 	print("... Done.")
 
@@ -198,17 +222,17 @@ def plot_probability_map_2(output_filename,
 
 	
 	# Plot contours
-	if healpix_obj_for_contours:
-		print("Plotting Contours...")
-		cs_outline = m.contour(healpix_obj_for_contours.X,
-							   healpix_obj_for_contours.Y,
-							   healpix_obj_for_contours.Z,
-							   levels=healpix_obj_for_contours.levels,
-							   colors='orange',
-							   latlon=True,
-							   alpha=1.0,
-							   linestyles=healpix_obj_for_contours.linestyle,
-							   linewidths=1.0)
+	# if healpix_obj_for_contours:
+	# 	print("Plotting Contours...")
+	# 	cs_outline = m.contour(healpix_obj_for_contours.X,
+	# 						   healpix_obj_for_contours.Y,
+	# 						   healpix_obj_for_contours.Z,
+	# 						   levels=healpix_obj_for_contours.levels,
+	# 						   colors='orange',
+	# 						   latlon=True,
+	# 						   alpha=1.0,
+	# 						   linestyles=healpix_obj_for_contours.linestyle,
+	# 						   linewidths=1.0)
 	
 
 	# Plot pixels
@@ -257,7 +281,7 @@ def plot_probability_map_2(output_filename,
 	if galaxies:
 		print("Plotting Galaxies...")
 		for g in galaxies:
-			g.plot(m, ax, facecolor='None', edgecolor='crimson', linewidth=1.0)
+			g.plot(m, ax, healpix_obj_for_contours, facecolor='None', edgecolor='crimson', linewidth=1.0)
 		
 
 #     # draw meridians
