@@ -7,113 +7,151 @@ from matplotlib.patches import Polygon
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib import colors
-
-class Pixel_Element:
-    def __init__(self,index,nside,prob):
-        
-        self.tile_references = []
-        
-        # Properties
-        self.__index = index
-        self.__nside = nside
-        self.__coord = None
-        self.__polygon = None
-        self.__prob = prob
-
-        self.__epi = np.array([])
-        
-    
-    @property
-    def index(self):
-        return self.__index
-    
-    @property
-    def nside(self):
-        return self.__nside
-    
-    @property
-    def prob(self):
-        return self.__prob
-        
-    @property
-    def coord(self):
-        if not self.__coord:
-            theta, phi = hp.pix2ang(self.nside, self.index)
-            pix_coord = coord.SkyCoord(ra=np.rad2deg(phi), 
-                                       dec=np.rad2deg(0.5 * np.pi - theta), 
-                                       unit=(u.deg,u.deg))
-            self.__coord = pix_coord
-        
-        return self.__coord
-    
-    @property
-    def polygon(self):
-        
-        if not self.__polygon:
-            pixel_xyz_vertices = hp.boundaries(self.nside, pix=self.index)
-            theta, phi = hp.vec2ang(np.transpose(pixel_xyz_vertices))
-
-            dec_rad = (np.pi/2. - theta)
-            ra_rad = phi*np.cos(dec_rad)
-
-            pixel_radian_vertices = [[ra,dec] for ra,dec in zip(ra_rad, dec_rad)]
-            self.__polygon = geometry.Polygon(pixel_radian_vertices)
-            
-        return self.__polygon
+import statistics
+from shapely.ops import linemerge, unary_union, polygonize, split
+from Teglon_Shape import *
 
 
-    def enclosed_pixel_indices(self, nside_out):
+class Pixel_Element(Telgon_Shape):
+	def __init__(self,index,nside,prob):
+		
+		self.tile_references = []
+		
+		# Properties
+		self.__index = index
+		self.__nside = nside
+		self.__coord = None
+		self.__prob = prob
 
-        # Sanity
-        if nside_out < self.nside:
-            raise("Can't get enclosed pixel indices for lower resolution pixels!")
-        
-        if len(self.__epi) == 0:
-            pixel_xyz_vertices = hp.boundaries(self.nside, pix=self.index)
-            internal_pix = hp.query_polygon(nside_out, pixel_xyz_vertices, inclusive=False)
-            self.__epi = internal_pix
-            
-        return self.__epi
+		# Used to check if this object is within this "radius proxy" of the coordinate signularity
+		self.__radius_proxy = 5*np.sqrt(hp.nside2pixarea(self.nside, degrees=True)/np.pi)
+		self.__polygon = None
+		self.__query_polygon = None
+		self.__query_polygon_string = None
 
+		self.__epi = np.array([])
+		
+	@property
+	def index(self):
+		return self.__index
+	
+	@property
+	def nside(self):
+		return self.__nside
+	
+	@property
+	def prob(self):
+		return self.__prob
+		
+	@property
+	def coord(self):
+		if not self.__coord:
+			theta, phi = hp.pix2ang(self.nside, self.index)
 
-    
-    def update_polygon(self, polygon):
-        self.__polygon = polygon
-    
-    
-    def get_patch(self, bmap):
-        ra_deg,dec_deg = zip(*[(np.degrees(coord_rad[0]/np.cos(coord_rad[1])), np.degrees(coord_rad[1])) 
-                               for coord_rad in self.polygon.exterior.coords])
+			ra = np.rad2deg(phi)
+			dec = np.rad2deg(0.5 * np.pi - theta)
 
-        # ra_deg_shifted = bmap.shiftdata(ra_deg,lon_0=180.0)
+			pix_coord = coord.SkyCoord(ra=np.rad2deg(phi), 
+									   dec=np.rad2deg(0.5 * np.pi - theta), 
+									   unit=(u.deg,u.deg))
 
-        x2,y2 = bmap(ra_deg,dec_deg)
+			self.__coord = pix_coord
+		
+		return self.__coord
+	
+	# Telgon_Shape properties
+	@property
+	def radius_proxy(self):
+		return self.__radius_proxy
 
-        lat_lons = np.vstack([x2,y2]).transpose()
-        patch = Polygon(lat_lons)
+	@property # Returns list of polygon
+	def polygon(self): 
+		
+		if not self.__polygon:
+			pixel_xyz_vertices = hp.boundaries(self.nside, pix=self.index)
+			theta, phi = hp.vec2ang(np.transpose(pixel_xyz_vertices))
 
-        return patch
+			ra_rad = phi
+			dec_rad = (np.pi/2. - theta)
+			
+			pixel_radian_vertices = [[ra,dec] for ra,dec in zip(ra_rad, dec_rad)]
+			self.__polygon = geometry.Polygon(pixel_radian_vertices)
+			
+		return [self.__polygon]
 
+	# NOTE -- always assuming RA coordinate of the form [0, 360]
+	@property
+	def query_polygon(self):
 
-    def plot(self, bmap, ax_to_plot, **kwargs): #value, 
-        
-        # Plot central point
-#         c = self.coord
-#         x1,y1 = bmap(c.ra.degree, c.dec.degree)
-#         bmap.plot(x1, y1, 'b.',markersize=5)
+		if not self.__query_polygon:
+			self.__query_polygon = self.create_query_polygon(initial_poly_in_radian=True)
+		return self.__query_polygon
 
-        
-        ra_deg,dec_deg = zip(*[(np.degrees(coord_rad[0]/np.cos(coord_rad[1])), np.degrees(coord_rad[1])) 
-                               for coord_rad in self.polygon.exterior.coords])
+	@property
+	def query_polygon_string(self):
 
-        x2,y2 = bmap(ra_deg,dec_deg)
-        lat_lons = np.vstack([x2,y2]).transpose()
+		if not self.__query_polygon_string:
 
-        # patches = [Polygon(lat_lons)]
-        # patch_collection = mpl.collections.PatchCollection(patches, cmap=plt.cm.viridis, 
-        #     norm=colors.LogNorm(), 
-        #     **kwargs)
-        # patch_collection.set_array([value])
-        # ax_to_plot.add_collection(patch_collection)
-        ax_to_plot.add_patch(Polygon(lat_lons, **kwargs))
+			mp_str = "MULTIPOLYGON("
+			multipolygon = []
+
+			for p in self.query_polygon:
+
+				mp = "(("
+				ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) for coord_deg in p.exterior.coords])
+				
+				for i in range(len(ra_deg)):
+					mp += "%s %s," % (ra_deg[i], dec_deg[i])
+
+				mp = mp[:-1] # trim the last ","
+				mp += ")),"
+				multipolygon.append(mp)
+
+			# Use the multipolygon string to create the WHERE clause
+			multipolygon[-1] = multipolygon[-1][:-1] # trim the last "," from the last object
+			
+			for mp in multipolygon:
+				mp_str += mp
+			mp_str += ")"
+			
+			self.__query_polygon_string = mp_str;
+
+		return self.__query_polygon_string
+
+	def enclosed_pixel_indices(self, nside_out):
+
+		# Sanity
+		if nside_out < self.nside:
+			raise("Can't get enclosed pixel indices for lower resolution pixels!")
+		
+		if len(self.__epi) == 0:
+			pixel_xyz_vertices = hp.boundaries(self.nside, pix=self.index)
+			internal_pix = hp.query_polygon(nside_out, pixel_xyz_vertices, inclusive=False)
+			self.__epi = internal_pix
+			
+		return self.__epi
+	
+	def get_patch(self, bmap):
+		
+		patches = []
+		query_polygon = self.query_polygon
+		for p in query_polygon:
+
+			ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) 
+								   for coord_deg in p.exterior.coords])
+
+			x2,y2 = bmap(ra_deg,dec_deg)
+			lat_lons = np.vstack([x2,y2]).transpose()
+			patch = Polygon(lat_lons)
+			patches.append(patch)
+
+		return patches
+
+	def plot(self, bmap, ax_to_plot, **kwargs):
+		query_polygon = self.query_polygon
+		for p in query_polygon:
+			ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) for coord_deg in p.exterior.coords])
+			x2,y2 = bmap(ra_deg,dec_deg)
+			lat_lons = np.vstack([x2,y2]).transpose()
+			ax_to_plot.add_patch(Polygon(lat_lons, **kwargs))
 

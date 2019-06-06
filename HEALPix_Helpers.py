@@ -18,6 +18,7 @@ from Tile import *
 from Pixel_Element import *
 import pprint
 import time	
+import math
 
 import multiprocessing as mp
 from scipy import spatial
@@ -159,8 +160,8 @@ class Unpacked_Healpix:
 		self.Z = Z
 
 def invoke_enclosed_pix(tile):
-    tile.enclosed_pixel_indices
-    return tile
+	tile.enclosed_pixel_indices
+	return tile
 
 def find_nearest(array, value):
 	array = np.asarray(array)
@@ -235,52 +236,43 @@ class Cartographer:
 		
 		return rescaled_unpacked_healpix
 
-	def generate_all_sky_coords(detector, starting_ra, starting_dec):
+	def generate_all_sky_coords(detector):
 	
-		# prob_sorted_pix = np.asarray(sorted(rescaled_pixels, key=lambda p: p.prob, reverse=True))
 		t1 = time.time()
 		
-
-		fov_fraction = 1.0
 		northern_limit = 90.0
 		southern_limit = -90.0
 		eastern_limit = 360.0
 		western_limit = 0.0
 
-		# Compute declination slices
+		frac_dec_tile, num_dec_tiles = math.modf(180.0/detector.deg_height)
+		total_dec_tiles = int(num_dec_tiles) + 1
+		dec_differential = (detector.deg_height - (frac_dec_tile*detector.deg_height))/num_dec_tiles
+
+		dec_delta = detector.deg_height - dec_differential
+		starting_dec = -90+detector.deg_height/2.0
+
 		decs = []
-		current_dec = starting_dec
-
-		# Go North
-		while current_dec < northern_limit:
-			decs.append(current_dec)
-			current_dec += (fov_fraction * detector.deg_height)
-
-		# Go South
-		current_dec = starting_dec - (fov_fraction * detector.deg_height)
-		while current_dec > southern_limit:
-			decs.append(current_dec)
-			current_dec -= (fov_fraction * detector.deg_height)
-
-
-		# Compute RAs for each declination slice. 
+		for i in range(total_dec_tiles):
+			d = starting_dec + i*dec_delta
+			decs.append(d)
+			
 		ras_over_decs = []
 		for d in decs:
-
+			
+			adjusted_tile_width = detector.deg_width/np.abs(np.cos(np.radians(d)))
+			frac_ra_tile, num_ra_tiles = math.modf(360.0/adjusted_tile_width)
+			total_ra_tiles = int(num_ra_tiles) + 1
+			
+			ra_differential = (adjusted_tile_width - (frac_ra_tile*adjusted_tile_width))/num_ra_tiles
+			ra_delta = adjusted_tile_width - ra_differential
+			
 			ras = []
-			current_ra = starting_ra
-
-			# Go East
-			while current_ra < eastern_limit:
-				ras.append(current_ra)
-				current_ra += (fov_fraction * detector.deg_width)/np.abs(np.cos(np.radians(d)))
-
-			# Go West
-			current_ra = starting_ra - (fov_fraction * detector.deg_width)/np.abs(np.cos(np.radians(d)))
-			while current_ra > western_limit:
-				ras.append(current_ra)
-				current_ra -= (fov_fraction * detector.deg_width)/np.abs(np.cos(np.radians(d)))
-
+			starting_ra = adjusted_tile_width/2.0
+			for i in range(total_ra_tiles):
+				r = starting_ra + i*ra_delta
+				ras.append(r)
+			
 			ras_over_decs.append(ras)
 
 		print("All Sky statistics for %s..." % detector.name)
@@ -345,8 +337,6 @@ class Cartographer:
 		_distnorm = unpacked_healpix.distnorm[galaxy_pixel_indices]
 		_mean, _stddev, _norm = distance.parameters_to_moments(_distmu, _distsigma)
 
-		# sq_stddev = [s**2 for s in _stddev]
-		# sq_galaxy_distance_errs = [s**2 for s in galaxy_distance_errs]
 		numerator = np.subtract(galaxy_distances, _mean)
 		denominator = np.add(np.power(_stddev, 2), np.power(galaxy_distance_errs, 2))
 
@@ -357,39 +347,6 @@ class Cartographer:
 		lum_prob = galaxy_lums/total_galaxy_lum
 		four_d_prob = lum_prob*three_d_prob
 		four_d_prob = (four_d_prob/np.sum(four_d_prob))*galaxy_cum_prob # normalize
-
-
-		# for g in galaxies:
-
-		# 	_prob = unpacked_healpix.prob[g.pixel_index]
-		# 	_distmu = unpacked_healpix.distmu[g.pixel_index]
-		# 	_distsigma = unpacked_healpix.distsigma[g.pixel_index]
-		# 	_distnorm = unpacked_healpix.distnorm[g.pixel_index]
-		# 	_mean, _stddev, _norm = distance.parameters_to_moments(_distmu, _distsigma)
-			
-		# 	if distance_override > 0.0:
-		# 		_mean = distance_override
-				
-		# 	if stddev_override > 0.0:
-		# 		_stddev = stddev_override
-
-		# 	# Assuming 1 std error == 36% from GLADE
-		# 	# upper_lim = 0.5*(1.0 + erf(((g.dist*1.36) - _mean)/(_stddev*np.sqrt(2))))
-		# 	# lower_lim = 0.5*(1.0 + erf(((g.dist*0.64) - _mean)/(_stddev*np.sqrt(2))))
-		# 	# z_prob = upper_lim - lower_lim
-
-		# 	# Using H0-derived redshift distances and distance errors
-		# 	sigmaTotal = np.abs(g.z_dist - _mean)/np.sqrt(_stddev**2 + g.z_dist_err**2)
-		# 	z_prob = 1.0 - erf(sigmaTotal)
-		# 	three_d_prob = z_prob*_prob
-
-		# 	lum_prob = g.B_lum_proxy/total_galaxy_lum
-		# 	four_d_prob = lum_prob*three_d_prob
-		# 	galaxy_probs.append(four_d_prob)
-
-
-		# # Renormalize
-		# galaxy_probs = (galaxy_probs/np.sum(galaxy_probs))*galaxy_cum_prob
 		
 		for i, g in enumerate(galaxies):
 			g.relative_prob = four_d_prob[i]
@@ -424,20 +381,6 @@ class Cartographer:
 		# These fractional probabilities get added on top of the field probability in the pixels
 		for g in galaxies:    
 			redistributed_prob[np.asarray(g.enclosed_pix)] += g.relative_prob/len(g.enclosed_pix)        
-			
-		
-		# Create new healpix_obj from working prob
-		redistributed_unpacked_healpix = Unpacked_Healpix("Redistributed_%s" % unpacked_healpix.file_name, 
-			redistributed_prob, 
-			unpacked_healpix.distmu, 
-			unpacked_healpix.distsigma, 
-			unpacked_healpix.distnorm, 
-			unpacked_healpix.header, 
-			unpacked_healpix.nside,
-			unpacked_healpix.npix,
-			unpacked_healpix.area_per_px,
-			linestyle="-", 
-			compute_contours=False)
 		
 		t2 = time.time()
 
@@ -445,44 +388,10 @@ class Cartographer:
 		print("`redistribute_probability` execution time: %s" % (t2 - t1))
 		print("********* end DEBUG ***********\n")
 
-		return redistributed_unpacked_healpix
-
-	def redistribute_probability_2(unpacked_healpix, galaxies, tiles, completeness):
-		
-		t1 = time.time()
-
-		# Copy probability
-		redistributed_prob = copy.deepcopy(unpacked_healpix.prob)
-		
-		# Compliment of completeness stays in the pixels
-		rescale_factor = 1.0 - completeness
-		print("Rescale factor: %s" % rescale_factor)
-
-		# Get unique list of pixels enclosed pix in tiles...
-		all_pix = []
-		for t in tiles:
-			all_pix += list(t.enclosed_pixel_indices)
-		unique_pix = np.asarray(list(set(all_pix)))
-
-		# Rescale those pixels...
-		redistributed_prob[unique_pix] = redistributed_prob[unique_pix]*rescale_factor
-
-		# Distribute each galaxy's probability over the number of pixels bounded by the galaxy radius
-		# These fractional probabilities get added on top of the field probability in the pixels
-		for g in galaxies:    
-			redistributed_prob[np.asarray(g.enclosed_pix)] += g.relative_prob/len(g.enclosed_pix)        
-		
-		t2 = time.time()
-
-		print("\n********* start DEBUG ***********")
-		print("`redistribute_probability` execution time: %s" % (t2 - t1))
-		print("********* end DEBUG ***********\n")
-
-		return redistributed_prob[unpacked_healpix.indices_of_90]
+		return redistributed_prob, unique_pix
 
 	def generate_tiles(unpacked_healpix, rescaled_pixels_90, rescale_detector, all_sky_coords, fudge_factor=0.75):
 			
-
 		t1 = time.time()
 
 		good_tiles = []
@@ -515,9 +424,7 @@ class Cartographer:
 
 		t1 = time.time()
 		# Parallelize initialization of good tiles
-		manager = mp.Manager()
 		pool = mp.Pool()
-
 		initialized_tiles = pool.map(invoke_enclosed_pix, good_tiles)
 
 		cum_prob = 0.0
@@ -536,10 +443,8 @@ class Cartographer:
 	def assign_tiles(self, input_tiles):
 		t1 = time.time()
 
-		
 		for t in input_tiles:
 			t.net_prob = np.sum(self.unpacked_healpix.prob[t.enclosed_pixel_indices])
-
 
 		sorted_tiles = sorted(input_tiles, key=lambda x: x.net_prob, reverse=True)
 
@@ -554,13 +459,12 @@ class Cartographer:
 		self.tiles = tile_sub_set
 		self.cumlative_prob_in_tiles = cum_prob
 		print("Total tiles for %s in `%s`: %s" % (self.rescale_detector.name, self.unpacked_healpix.file_name, len(self.tiles)))
-		print("Sanity check: Cumulative prob in tiles based on non-scaled pixels close to 0.90? Cumulate Prob = %s" % self.cumlative_prob_in_tiles)
+		print("Sanity check: Cumulative prob in tiles based on original pixel resolution close to 0.90? Cumulate Prob = %s" % self.cumlative_prob_in_tiles)
 
 		t2 = time.time()
 		print("\n********* start DEBUG ***********")
 		print("`generate_tiles.assign_tiles` execution time: %s" % (t2 - t1))
 		print("********* end DEBUG ***********\n")
-
 
 
 	def __init__(self, gwid, unpacked_healpix, rescale_detector, all_sky_coords, generate_tiles=True, downsample_map=True):
@@ -573,11 +477,9 @@ class Cartographer:
 		self.cumlative_prob_in_tiles = 0.0
 
 		if downsample_map:
-
 			print("Rescaling %s for %s" % (unpacked_healpix.file_name, rescale_detector.name))
 			rescaled_healpix = Cartographer.downsample_map(self.rescale_detector, self.unpacked_healpix)
 
-			
 			# Debug
 			total_prob_rescaled_pixels_90 = np.sum([p.prob for p in rescaled_healpix.pixels_90])
 			print("Sanity check: Sum of probability in 90th percentile, rescaled pix? Sum = %s" % total_prob_rescaled_pixels_90)
@@ -611,7 +513,6 @@ class glade_galaxy:
 		self.Name_HyperLEDA = db_result[5]
 		self.Name_2MASS = db_result[6]
 		self.Name_SDSS_DR12 = db_result[7]
-		
 		self.RA = float(db_result[8]) if db_result[8] is not None else db_result[8]
 
 		# Hack: convert the RA of the galaxy from [0,360] to [-180,180]
@@ -623,21 +524,15 @@ class glade_galaxy:
 		self.Dec = float(db_result[9]) if db_result[9] is not None else db_result[9]
 		# db_result[10] == MySQL POINT object...
 		self.dist = float(db_result[11]) if db_result[11] is not None else db_result[11]
-
-
-
 		
 		theta = 0.5 * np.pi - np.deg2rad(self.Dec)
 		phi = np.deg2rad(self.RA)
 		self.pixel_index = hp.ang2pix(unpacked_healpix.nside, theta, phi)
 		
-		
 		self.dist_err = float(db_result[12]) if db_result[12] is not None else db_result[12]
 		self.z_dist = float(db_result[13]) if db_result[13] is not None else db_result[13]
 		self.z_dist_err = float(db_result[14]) if db_result[14] is not None else db_result[14]
 		self.z = float(db_result[15]) if db_result[15] is not None else db_result[15]
-
-
 		
 		self.enclosed_pix = []
 		self.polygon_coords = []
@@ -673,9 +568,7 @@ class glade_galaxy:
 			
 		# else:
 		# 	self.enclosed_pix.append(self.pixel_index)
-
 		self.enclosed_pix.append(self.pixel_index)
-		
 
 		self.B = float(db_result[16]) if db_result[16] is not None else db_result[16]
 		self.B_err = float(db_result[17]) if db_result[17] is not None else db_result[17]
@@ -689,14 +582,9 @@ class glade_galaxy:
 		self.flag1 = db_result[25]
 		self.flag2 = db_result[26]
 		self.flag3 = db_result[27]
-
-		# self.B_lum_proxy = (self.dist**2)*10**(-0.4*self.B)
 		self.B_lum_proxy = (self.z_dist**2)*10**(-0.4*self.B)
 		self.relative_prob = 0.0
-
 		self.galaxy_glade_completeness = -999
-		
-
 
 	def plot(self, bmap, ax_to_plot, unpacked_healpix, **kwargs):
 		
@@ -723,14 +611,6 @@ class glade_galaxy:
 			c = coord.SkyCoord(self.RA, self.Dec, unit=(u.deg, u.deg))
 			pe = Pixel_Element(self.pixel_index, unpacked_healpix.nside, unpacked_healpix.prob[self.pixel_index])
 			pe.plot(bmap, ax_to_plot, facecolor=fc, edgecolor=ec, linewidth=0.1, alpha=alph, zorder=9500)
-
-			# x,y = bmap(c.ra.degree, c.dec.degree)
-
-			# ms = kwargs.get('ms',"0.01")
-			# if self.relative_prob < 1e-8:
-			# 	bmap.plot(x, y, 'k.', markersize=ms, mfc='None', alpha=0.5)
-			# else:
-			# 	bmap.plot(x, y, 'r.', markersize=ms, mfc='r',alpha=1)
 		
 
 	def __repr__(self):

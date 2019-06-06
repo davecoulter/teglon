@@ -44,6 +44,7 @@ from httplib2 import Http
 
 from HEALPix_Helpers import *
 from Tile import *
+from SQL_Polygon import *
 from Pixel_Element import *
 
 import xml.etree.ElementTree as ET
@@ -143,8 +144,9 @@ class GTT:
 
 	def main(self):
 
+		### UNPACKING THE HEALPIX FILES ###
+
 		hpx_path = "%s/%s" % (self.options.healpix_dir, self.options.healpix_file)
-		
 		
 		# If you specify a telescope that's not in the default list, you must provide the rest of the information
 		detector = None
@@ -182,10 +184,6 @@ class GTT:
 			detector.name, detector.deg_width, detector.deg_height))
 		print("%s FOV area: %s" % (detector.name, (detector.deg_width * detector.deg_height)))
 
-
-
-
-
 		t1 = time.time()
 		
 		print("Unpacking '%s':%s..." % (self.options.gw_id, hpx_path))
@@ -197,9 +195,6 @@ class GTT:
 		print("\n********* start DEBUG ***********")
 		print("`Unpacking healpix` execution time: %s" % (t2 - t1))
 		print("********* end DEBUG ***********\n")
-
-
-
 
 		npix = len(prob)
 		print("\nNumber of pix in '%s': %s" % (hpx_path,len(prob)))
@@ -243,56 +238,42 @@ class GTT:
 		print("Area of 90th: %s\n" % area_90)
 
 
-		# Get Swope all-sky tile pattern
+
+
+
+		### GENERATE THE ALL-SKY TILING FOR A DETECTOR & GET THE ENCLOSED GALAXIES ###
+
 		print("Generating all sky coords for %s" % detector.name)
-
-		# Get pixel element for highest prob pixel
-		index_of_max_prob = np.argmax(unpacked_healpix.prob)
-		max_pixel = Pixel_Element(index_of_max_prob, unpacked_healpix.nside, unpacked_healpix.prob[index_of_max_prob])
-
-		# Center grid on highest prob pixel
-		detector_all_sky_coords = Cartographer.generate_all_sky_coords(detector, 
-			max_pixel.coord.ra.degree, 
-			max_pixel.coord.dec.degree)
-
+		detector_all_sky_coords = Cartographer.generate_all_sky_coords(detector)
 		base_cartography = Cartographer(self.options.gw_id, unpacked_healpix, detector, detector_all_sky_coords, generate_tiles=True)
-
 
 		# Save cartograpy
 		with open('%s/%s_base_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
 			pickle.dump(base_cartography, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-
 		# Build the spatial query
 		t1 = time.time()
 
-		multipolygon = []
-		joined_poly = unary_union(base_cartography.tiles)
+		# Join all tiles together into a composite polygon to simplify the SQL query
+		net_polygon = []
+		for t in base_cartography.tiles:
+			net_polygon += t.query_polygon
+		joined_poly = unary_union(net_polygon)
 		
+		# Fix any seams
 		eps = 0.00001
 		merged_poly = joined_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
 		print("Number of sub-polygons in query: %s" % len(merged_poly))
+
+		# Create and save sql_poly
+		sql_poly = SQL_Polygon(merged_poly, detector)
+		with open('%s/%s_sql_poly.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
+			pickle.dump(sql_poly, handle, protocol=pickle.HIGHEST_PROTOCOL)
 		
-		# Build the multipolygon string
-		for p in merged_poly:
-
-			mp = "(("
-			ra_deg,dec_deg = zip(*[(np.degrees(coord_rad[0]), np.degrees(coord_rad[1])) for coord_rad in p.exterior.coords])
-			
-			for i in range(len(ra_deg)):
-				mp += "%s %s," % (ra_deg[i], dec_deg[i])
-
-			mp = mp[:-1] # trim the last ","
-			mp += ")),"
-			multipolygon.append(mp)
-
-		# Use the multipolygon string to create the WHERE clause
-		multipolygon[-1] = multipolygon[-1][:-1] # trim the last "," from the last object
-		mp_where = "ST_WITHIN(Coord, ST_GEOMFROMTEXT('MultiPolygon("
-		for mp in multipolygon:
-			mp_where += mp
-		mp_where += ")'));"
-
+		# # Use the sql_poly string to create the WHERE clause
+		mp_where = "ST_WITHIN(Coord, ST_GEOMFROMTEXT('"
+		mp_where += sql_poly.query_polygon_string
+		mp_where += "'));"
 
 		t2 = time.time()
 
@@ -314,7 +295,6 @@ class GTT:
 		with open('%s/%s_query.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
 			pickle.dump(query, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-
 		result = QueryDB(query, port=LOCAL_PORT)
 
 		t2 = time.time()
@@ -322,7 +302,6 @@ class GTT:
 		print("\n********* start DEBUG ***********")
 		print("`Query database` execution time: %s" % (t2 - t1))
 		print("********* end DEBUG ***********\n")
-
 
 		# Instantiate galaxies
 		contained_galaxies = []
@@ -347,13 +326,16 @@ class GTT:
 
 		print("Query returned %s galaxies" % len(contained_galaxies))
 
-		
-
 		avg_dist = average_distance_prior(base_cartography.unpacked_healpix)
 		catalog_completeness = GLADE_completeness(avg_dist)
 		print("Completeness: %s" % catalog_completeness)
 
-			
+
+
+
+
+		### REDISTRIBUTE THE PROBABILITY IN THE MAP TO THE GALAXIES ###
+
 		print("Assigning relative prob...")
 		Cartographer.assign_galaxy_relative_prob(base_cartography.unpacked_healpix, 
 												 contained_galaxies,
@@ -367,23 +349,32 @@ class GTT:
 
 		print("Redistribute prob...")
 		# redistributed_map
-		# redistributed_90 == 90th percentile pixels that have beeen redistributed with galaxy info
-		redistributed_90 = Cartographer.redistribute_probability_2(base_cartography.unpacked_healpix,
+		redistributed_prob, enclosed_indices = Cartographer.redistribute_probability(base_cartography.unpacked_healpix,
 																  contained_galaxies,
 																  base_cartography.tiles,
 																  catalog_completeness)
 
 		# Copy base cartography (have to do this?) and update the prob of the 90th perecentil
 		redistributed_cartography = copy.deepcopy(base_cartography)
-		redistributed_cartography.unpacked_healpix.prob[base_cartography.unpacked_healpix.indices_of_90] = redistributed_90
+		redistributed_cartography.unpacked_healpix.prob = redistributed_prob
+		redistributed_cartography.unpacked_healpix.pixels_90 = [Pixel_Element(ei, 
+																			  redistributed_cartography.unpacked_healpix.nside, 
+																			  redistributed_cartography.unpacked_healpix.prob[ei]) 
+																for ei in enclosed_indices]
+		
 
 		# Update the origiunal tiles with the new probability
 		redistributed_cartography.assign_tiles(base_cartography.tiles)
-
 		# Save cartograpy
 		with open('%s/%s_redstributed_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
 			pickle.dump(redistributed_cartography, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
+
+
+
+
+
+		### SAVE THE RESULTS ###
 
 		def GetSexigesimalString(c):
 			ra = c.ra.hms
@@ -399,7 +390,6 @@ class GTT:
 			if c.dec < 0.0 and dec[0] == 0.0:
 				dec_string = "-00:%02d:%05.2f" % (np.abs(dec[1]),np.abs(dec[2]))
 			return (ra_string, dec_string)
-
 
 		t1 = time.time()
 		sorted_tiles = sorted(redistributed_cartography.tiles, 

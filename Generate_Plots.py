@@ -45,6 +45,7 @@ from httplib2 import Http
 from HEALPix_Helpers import *
 from Tile import *
 from Pixel_Element import *
+from SQL_Polygon import *
 
 import xml.etree.ElementTree as ET
 
@@ -205,6 +206,11 @@ class GTT:
 		# with open('%s/%s_query.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
 		# 	query = pickle.load(handle)
 
+		print("Loading sql multipolygon...")
+		sql_poly = None
+		with open('%s/%s_sql_poly.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
+			sql_poly = pickle.load(handle)
+
 		print("Loading contained galaxies...")
 		contained_galaxies = None
 		with open('%s/%s_contained_galaxies.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
@@ -312,20 +318,20 @@ class GTT:
 		# 	print("Done")
 
 
-		test = []
-		for t in base_cartography.tiles:
-			test.append(t.polygon)
+		# test = []
+		# for t in base_cartography.tiles:
+		# 	test.append(t.polygon)
 
-		# print("here")
-		# print(list(test[0].exterior.coords))
-		# print("\n\n")
+		# # print("here")
+		# # print(list(test[0].exterior.coords))
+		# # print("\n\n")
 
-		test2 = unary_union(test)
-		# print(type(test2))
+		# test2 = unary_union(test)
+		# # print(type(test2))
 
 		
-		eps = 0.00001
-		test3 = test2.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+		# eps = 0.00001
+		# test3 = test2.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
 
 
 		# plot_probability_map("%s/%s_SQL_Pixels" % (self.options.working_dir, self.options.gw_id),
@@ -336,14 +342,18 @@ class GTT:
 		# 			 linear_rings=test3)
 
 
-
+		# pixels_90 = [Pixel_Element(i90, redistributed_cartography.unpacked_healpix.nside, 
+		# 							redistributed_cartography.unpacked_healpix.prob[i90]) 
+		# 							for i90 in redistributed_cartography.unpacked_healpix.indices_of_90]
 
 		plot_probability_map("%s/%s_%s_Redistributed_90th_Tiles" % (self.options.working_dir, self.options.gw_id, detector.name),
 					 pixels_filled=redistributed_cartography.unpacked_healpix.pixels_90,
-					 galaxies=contained_galaxies,
+					 # galaxies=contained_galaxies,
 					 tiles=redistributed_cartography.tiles,
-					 linear_rings=test3,
-					 healpix_obj_for_contours=base_cartography.unpacked_healpix
+					 # tiles=base_cartography.tiles,
+					 sql_poly=sql_poly,
+					 # linear_rings=sql_poly.polygon,
+					 # healpix_obj_for_contours=base_cartography.unpacked_healpix
 					 )
 
 

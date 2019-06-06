@@ -23,11 +23,14 @@ def plot_probability_map(output_filename,
 						 distance=None,
 						 # empty_pixel=False,
 						 tile_set=None,
-						 linear_rings=None):
+						 sql_poly=None,
+						 linear_rings=None
+						 ):
 	
 	print("Plotting `%s`" % output_filename)
 	
 	fig = plt.figure(figsize=(30,30), dpi=1000)
+	# fig = plt.figure(figsize=(20,20), dpi=512)
 	ax = fig.add_subplot(111)
 	
 #     # GW190425 - specific
@@ -72,7 +75,8 @@ def plot_probability_map(output_filename,
 		patches = []
 		values = []
 		for p in pixels_filled:
-			patches.append(p.get_patch(m))
+			# patches.append(p.get_patch(m))
+			patches += p.get_patch(m)
 
 			pprob = p.prob
 			if p.prob <= 0.0:
@@ -88,7 +92,8 @@ def plot_probability_map(output_filename,
 		for p in pixels_empty:
 			p.plot(m, ax, edgecolor='k', facecolor='None', linewidth=0.25, alpha=1.0)
 
-
+	if sql_poly:
+		sql_poly.plot(m, ax, edgecolor='k', linewidth=0.35, facecolor='None',zorder=9000)
 
 	if linear_rings:
 		for lr in linear_rings:
