@@ -36,7 +36,6 @@ class Tile(Telgon_Shape):
 		self.__query_polygon = None
 		# self.__query_polygon_string = None
 
-
 		self.__enclosed_pixel_indices = np.array([])
 		
 	def __str__(self):

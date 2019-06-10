@@ -37,6 +37,7 @@ class SQL_Polygon(Telgon_Shape):
 			self.__query_polygon = self.create_query_polygon(initial_poly_in_radian=False)
 		return self.__query_polygon
 
+	# Formatted for MySQL WGS84 spatial reference system
 	@property
 	def query_polygon_string(self):
 
@@ -52,7 +53,7 @@ class SQL_Polygon(Telgon_Shape):
 				ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) for coord_deg in p.exterior.coords])
 				
 				for i in range(len(ra_deg)):
-					mp += "%s %s," % (ra_deg[i], dec_deg[i])
+					mp += "%s %s," % (dec_deg[i], ra_deg[i] - 180.0)
 
 				mp = mp[:-1] # trim the last ","
 				mp += ")),"

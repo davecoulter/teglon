@@ -273,7 +273,7 @@ class GTT:
 		# # Use the sql_poly string to create the WHERE clause
 		mp_where = "ST_WITHIN(Coord, ST_GEOMFROMTEXT('"
 		mp_where += sql_poly.query_polygon_string
-		mp_where += "'));"
+		mp_where += "', 4326));"
 
 		t2 = time.time()
 

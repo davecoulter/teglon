@@ -24,15 +24,8 @@ import multiprocessing as mp
 from scipy import spatial
 
 class Detector:
-	# def __init__(self, detector_name, detector_width_npix, detector_height_npix, pixel_scale):
 	def __init__(self, detector_name, detector_width_deg, detector_height_deg):
 		self.name = detector_name
-		# self.width_npix = detector_width_npix
-		# self.height_npix = detector_height_npix
-		# self.pixel_scale = pixel_scale
-
-		# self.deg_width = self.width_npix * self.pixel_scale/3600. #arcseconds -> deg
-		# self.deg_height = self.height_npix * self.pixel_scale/3600. #arcseconds -> deg
 		self.deg_width = detector_width_deg
 		self.deg_height = detector_height_deg
 
