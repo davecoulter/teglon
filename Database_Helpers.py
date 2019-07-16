@@ -25,11 +25,13 @@ def QueryDB(query, port='3306', query_data=None):
 	cursor = cnx.cursor()
 	
 	if query_data is not None:
+		print("this")
 		cursor.execute(query, query_data)
 	else:
+		print("that")
 		cursor.execute(query)
 	
-	results = [result for result in cursor]
+	results = cursor.fetchall()
 	
 	cursor.close()
 	cnx.close()

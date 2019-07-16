@@ -343,7 +343,7 @@ class GTT:
 												 catalog_completeness)
 
 
-		# Save cartograpy
+		# Save contained galaxies
 		with open('%s/%s_contained_galaxies.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
 			pickle.dump(contained_galaxies, handle, protocol=pickle.HIGHEST_PROTOCOL)
 

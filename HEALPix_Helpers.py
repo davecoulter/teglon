@@ -24,10 +24,13 @@ import multiprocessing as mp
 from scipy import spatial
 
 class Detector:
-	def __init__(self, detector_name, detector_width_deg, detector_height_deg):
+	def __init__(self, detector_name, detector_width_deg, detector_height_deg, detector_radius_deg=None):
+		self.id = None
 		self.name = detector_name
 		self.deg_width = detector_width_deg
 		self.deg_height = detector_height_deg
+		self.deg_radius = detector_radius_deg
+		self.area = None
 
 class Unpacked_Healpix:
 	def __init__(self, file_name, prob, distmu, distsigma, distnorm, header, nside, 
@@ -233,17 +236,29 @@ class Cartographer:
 	
 		t1 = time.time()
 		
-		northern_limit = 90.0
-		southern_limit = -90.0
-		eastern_limit = 360.0
+		northern_limit = 89.99999
+		southern_limit = -89.99999
+		eastern_limit = 359.99999
 		western_limit = 0.0
 
-		frac_dec_tile, num_dec_tiles = math.modf(180.0/detector.deg_height)
+		# northern_limit = 89.99999
+		# southern_limit = 60.0
+		# eastern_limit = 359.99999
+		# western_limit = 180.0
+
+		dec_range = 179.99999
+		ra_range = 359.99999
+
+		frac_dec_tile, num_dec_tiles = math.modf(dec_range/detector.deg_height)
+
 		total_dec_tiles = int(num_dec_tiles) + 1
+		if num_dec_tiles == 0:
+			num_dec_tiles = 1
+
 		dec_differential = (detector.deg_height - (frac_dec_tile*detector.deg_height))/num_dec_tiles
 
 		dec_delta = detector.deg_height - dec_differential
-		starting_dec = -90+detector.deg_height/2.0
+		starting_dec = southern_limit+detector.deg_height/2.0
 
 		decs = []
 		for i in range(total_dec_tiles):
@@ -254,9 +269,13 @@ class Cartographer:
 		for d in decs:
 			
 			adjusted_tile_width = detector.deg_width/np.abs(np.cos(np.radians(d)))
-			frac_ra_tile, num_ra_tiles = math.modf(360.0/adjusted_tile_width)
+
+			frac_ra_tile, num_ra_tiles = math.modf(ra_range/adjusted_tile_width)
 			total_ra_tiles = int(num_ra_tiles) + 1
-			
+
+			if num_ra_tiles == 0:
+				num_ra_tiles = 1
+
 			ra_differential = (adjusted_tile_width - (frac_ra_tile*adjusted_tile_width))/num_ra_tiles
 			ra_delta = adjusted_tile_width - ra_differential
 			

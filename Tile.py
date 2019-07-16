@@ -34,9 +34,11 @@ class Tile(Telgon_Shape):
 		self.__radius_proxy = 5.0*np.sqrt(self.width*self.height/np.pi)
 		self.__polygon = None
 		self.__query_polygon = None
-		# self.__query_polygon_string = None
+		self.__query_polygon_string = None
 
 		self.__enclosed_pixel_indices = np.array([])
+		self.N32_pixel_index = None
+		self.N32_pixel_id = None
 		
 	def __str__(self):
 		return str(self.__dict__)
@@ -54,11 +56,14 @@ class Tile(Telgon_Shape):
 			ra_offset = coord.Angle(width_corr/2., unit=u.deg)
 			dec_offset = coord.Angle(self.height/2., unit=u.deg)
 
-			SW = coord.SkyCoord(self.coord.ra - ra_offset, self.coord.dec - dec_offset)
-			NW = coord.SkyCoord(self.coord.ra - ra_offset, self.coord.dec + dec_offset)
+			southern_dec = (self.coord.dec - dec_offset) if (self.coord.dec - dec_offset).degree > -90 else coord.Angle((self.coord.dec - dec_offset).degree + 0.00001, unit=u.degree)
+			northern_dec = (self.coord.dec + dec_offset) if (self.coord.dec + dec_offset).degree < 90 else coord.Angle((self.coord.dec + dec_offset).degree - 0.00001, unit=u.degree)
 
-			SE = coord.SkyCoord(self.coord.ra + ra_offset, self.coord.dec - dec_offset)
-			NE = coord.SkyCoord(self.coord.ra + ra_offset, self.coord.dec + dec_offset)
+			SW = coord.SkyCoord(self.coord.ra - ra_offset, southern_dec)
+			NW = coord.SkyCoord(self.coord.ra - ra_offset, northern_dec)
+
+			SE = coord.SkyCoord(self.coord.ra + ra_offset, southern_dec)
+			NE = coord.SkyCoord(self.coord.ra + ra_offset, northern_dec)
 
 			self.__corner_coords = np.asarray([SW,NW,NE,SE])
 			
@@ -103,6 +108,40 @@ class Tile(Telgon_Shape):
 		if not self.__query_polygon:
 			self.__query_polygon = self.create_query_polygon(initial_poly_in_radian=True)
 		return self.__query_polygon
+
+
+	@property
+	def query_polygon_string(self):
+
+		if not self.__query_polygon_string:
+
+			mp_str = "MULTIPOLYGON("
+			multipolygon = []
+
+			for p in self.query_polygon:
+
+				mp = "(("
+				ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) for coord_deg in p.exterior.coords])
+				
+				# For the SRS in the DB, we need to emulate lat,lon
+				for i in range(len(ra_deg)):
+					mp += "%s %s," % (dec_deg[i], ra_deg[i] - 180.0)
+
+				mp = mp[:-1] # trim the last ","
+				mp += ")),"
+				multipolygon.append(mp)
+
+			# Use the multipolygon string to create the WHERE clause
+			multipolygon[-1] = multipolygon[-1][:-1] # trim the last "," from the last object
+			
+			for mp in multipolygon:
+				mp_str += mp
+			mp_str += ")"
+			
+			self.__query_polygon_string = mp_str;
+
+		return self.__query_polygon_string
+
 	
 	@property
 	def enclosed_pixel_indices(self):

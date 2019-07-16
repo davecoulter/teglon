@@ -19,6 +19,7 @@ class Pixel_Element(Telgon_Shape):
 		self.tile_references = []
 		
 		# Properties
+		self.id = None
 		self.__index = index
 		self.__nside = nside
 		self.__coord = None
@@ -31,6 +32,13 @@ class Pixel_Element(Telgon_Shape):
 		self.__query_polygon_string = None
 
 		self.__epi = np.array([])
+
+		# For all NSIDE < self.nside:
+		# { NSIDE: Containing Pixel Index }
+		self.parent_pixel = None
+
+	def __str__(self):
+		return str(self.__dict__)
 		
 	@property
 	def index(self):
@@ -102,6 +110,7 @@ class Pixel_Element(Telgon_Shape):
 				mp = "(("
 				ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) for coord_deg in p.exterior.coords])
 				
+				# For the SRS in the DB, we need to emulate lat,lon
 				for i in range(len(ra_deg)):
 					mp += "%s %s," % (dec_deg[i], ra_deg[i] - 180.0)
 
@@ -139,11 +148,10 @@ class Pixel_Element(Telgon_Shape):
 		query_polygon = self.query_polygon
 		for p in query_polygon:
 
-			ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) 
-								   for coord_deg in p.exterior.coords])
-
+			ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) for coord_deg in p.exterior.coords])
 			x2,y2 = bmap(ra_deg,dec_deg)
 			lat_lons = np.vstack([x2,y2]).transpose()
+
 			patch = Polygon(lat_lons)
 			patches.append(patch)
 
@@ -152,8 +160,10 @@ class Pixel_Element(Telgon_Shape):
 	def plot(self, bmap, ax_to_plot, **kwargs):
 		query_polygon = self.query_polygon
 		for p in query_polygon:
+
 			ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) for coord_deg in p.exterior.coords])
 			x2,y2 = bmap(ra_deg,dec_deg)
 			lat_lons = np.vstack([x2,y2]).transpose()
+
 			ax_to_plot.add_patch(Polygon(lat_lons, **kwargs))
 

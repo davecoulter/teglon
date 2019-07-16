@@ -225,6 +225,159 @@ class GTT:
 			redistributed_cartography = pickle.load(handle)
 
 
+
+		# swope_width = 4096*0.435/3600. #arcseconds -> deg
+		# swope_height = 4112*0.435/3600.
+
+		# thacher_width = 2048*0.609/3600. #arcseconds -> deg
+		# thacher_height = 2048*0.609/3600.
+
+		# nickel_width = 2048*0.368/3600. #arcseconds -> deg
+		# nickel_height = 2048*0.368/3600.
+
+		# nickel_width = 2048*0.368/3600. #arcseconds -> deg
+		# nickel_height = 2048*0.368/3600.
+
+		# andicam_ccd_width = 1024*0.371/3600. #arcseconds -> deg
+		# andicam_ccd_height = 1024*0.371/3600.
+
+		# swift_uvot_width = 2048*0.502/3600. #arcseconds -> deg
+		# swift_uvot_height = 2048*0.502/3600.
+
+		# saguaro_width = 2.26 #deg
+		# saguaro_height = 2.26
+
+		# observed_tiles = {
+		# 	"S190425z":{"Swope":{"ut190425":[], "ut190428":[], "ut190429":[]},
+		# 				"Thacher":{"ut190425":[]},
+		# 				"ANDICAM":{"ut190425":[], "ut190428":[]},
+		# 				"Nickel":{"ut190425":[], "ut190429":[]},
+		# 				"Swift":{"ut190425":[]},
+		# 				"SAGUARO":{"ut190425":[]}
+		# 			   }
+		# }
+
+		# # Just do S190425z for now...
+		# # SWOPE
+		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_Swope_Tiles_Observed.csv','r') as csvfile:
+
+		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+		# 	next(csvreader)
+			
+		# 	for row in csvreader:
+		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), swope_width, swope_height, redistributed_cartography.unpacked_healpix.nside)
+		# 		(observed_tiles["S190425z"]["Swope"]["ut190425"]).append(t)
+				
+				
+		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190428_Swope_Tiles_Observed.csv','r') as csvfile:
+
+		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+		# 	next(csvreader)
+			
+		# 	for row in csvreader:
+		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), swope_width, swope_height, redistributed_cartography.unpacked_healpix.nside)
+		# 		(observed_tiles["S190425z"]["Swope"]["ut190428"]).append(t)
+				
+		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190429_Swope_Tiles_Observed.csv','r') as csvfile:
+
+		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+		# 	next(csvreader)
+			
+		# 	for row in csvreader:
+		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), swope_width, swope_height, redistributed_cartography.unpacked_healpix.nside)
+		# 		(observed_tiles["S190425z"]["Swope"]["ut190429"]).append(t)
+
+		# # THACHER
+		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_Thacher_Tiles_Observed.csv','r') as csvfile:
+
+		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+		# 	next(csvreader)
+			
+		# 	for row in csvreader:
+		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), thacher_width, thacher_height, redistributed_cartography.unpacked_healpix.nside)
+		# 		(observed_tiles["S190425z"]["Thacher"]["ut190425"]).append(t)
+
+		# # ANDICAM
+		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_ANDICAM_Tiles_Observed.csv','r') as csvfile:
+
+		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+		# 	next(csvreader)
+			
+		# 	for row in csvreader:
+		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), andicam_ccd_width, andicam_ccd_height, redistributed_cartography.unpacked_healpix.nside)
+		# 		(observed_tiles["S190425z"]["ANDICAM"]["ut190425"]).append(t)
+				
+		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190428_ANDICAM_Tiles_Observed.csv','r') as csvfile:
+
+		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+		# 	next(csvreader)
+			
+		# 	for row in csvreader:
+		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), andicam_ccd_width, andicam_ccd_height, redistributed_cartography.unpacked_healpix.nside)
+		# 		(observed_tiles["S190425z"]["ANDICAM"]["ut190428"]).append(t)
+
+		# # NICKEL
+		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_Nickel_Tiles_Observed.csv','r') as csvfile:
+
+		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+		# 	next(csvreader)
+			
+		# 	for row in csvreader:
+		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), nickel_width, nickel_height, redistributed_cartography.unpacked_healpix.nside)
+		# 		(observed_tiles["S190425z"]["Nickel"]["ut190425"]).append(t)
+				
+		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190429_Nickel_Tiles_Observed.csv','r') as csvfile:
+
+		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+		# 	next(csvreader)
+			
+		# 	for row in csvreader:
+		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), nickel_width, nickel_height, redistributed_cartography.unpacked_healpix.nside)
+		# 		(observed_tiles["S190425z"]["Nickel"]["ut190429"]).append(t)
+
+		# # Swift
+		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_Swift_Tiles_Observed.csv','r') as csvfile:
+
+		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+		# 	next(csvreader)
+			
+		# 	for row in csvreader:
+		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.deg, u.deg)), swift_uvot_width, swift_uvot_height, redistributed_cartography.unpacked_healpix.nside)
+		# 		(observed_tiles["S190425z"]["Swift"]["ut190425"]).append(t)
+
+
+
+		# for k1,v1 in observed_tiles.items():
+		# 	print("%s" % k1)
+			
+		# 	for k2,v2 in observed_tiles[k1].items():
+		# 		print("\t%s" % k2)
+
+		# 		for k3,v3 in observed_tiles[k1][k2].items():
+		# 			print("\t\t%s - # of tiles: %s" % (k3, len(observed_tiles[k1][k2][k3])))
+						
+
+		# 	print("\n")
+
+
+		# tile_set = [
+		# 	("Swope_0425",observed_tiles["S190425z"]["Swope"]["ut190425"],('r','None')),
+		# 	("Swope_0428",observed_tiles["S190425z"]["Swope"]["ut190428"],('r','None')),
+		# 	("Swope_0429",observed_tiles["S190425z"]["Swope"]["ut190429"],('r','None')),
+			
+		# 	("Thacher_0425",observed_tiles["S190425z"]["Thacher"]["ut190425"],('royalblue','None')),
+			
+		# 	("ANDICAM_0425",observed_tiles["S190425z"]["ANDICAM"]["ut190425"],('forestgreen','None')),
+		# 	("ANDICAM_0428",observed_tiles["S190425z"]["ANDICAM"]["ut190428"],('forestgreen','None')),
+			
+		# 	("Nickel_0425",observed_tiles["S190425z"]["Nickel"]["ut190425"],('mediumorchid','None')),
+		# 	("Nickel_0429",observed_tiles["S190425z"]["Nickel"]["ut190429"],('mediumorchid','None')),
+			
+		# 	("Swift_0425",observed_tiles["S190425z"]["Swift"]["ut190425"],('k','None'))
+		# ]
+
+
+
 		# # In case you want to plot contours...
 		# print("Computing contours for '%s'...\n" % base_cartography.unpacked_healpix.file_name)
 		# base_cartography.unpacked_healpix.compute_contours()
@@ -353,7 +506,8 @@ class GTT:
 					 # tiles=base_cartography.tiles,
 					 sql_poly=sql_poly,
 					 # linear_rings=sql_poly.polygon,
-					 # healpix_obj_for_contours=base_cartography.unpacked_healpix
+					 # healpix_obj_for_contours=base_cartography.unpacked_healpix,
+					 # tile_set=tile_set
 					 )
 
 
