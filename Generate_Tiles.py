@@ -93,11 +93,15 @@ class GTT:
 		nickel_deg_width = 2048*0.368/3600.
 		nickel_deg_height = 2048*0.368/3600.
 
+		mosfire_deg_width = 6.14/60.0
+		mosfire_deg_height = 6.14/60.0
+
 		self.telescope_mapping = {
 		"S":Detector("SWOPE", swope_deg_width, swope_deg_height),
 		"A":Detector("ANDICAM", andicam_deg_width, andicam_deg_height),
 		"T":Detector("THACHER", thacher_deg_width, thacher_deg_height),
-		"N":Detector("NICKEL", nickel_deg_width, nickel_deg_height)
+		"N":Detector("NICKEL", nickel_deg_width, nickel_deg_height),
+		"M":Detector("MOSFIRE", mosfire_deg_width, mosfire_deg_height)
 		}
 
 	def add_options(self, parser=None, usage=None, config=None):
@@ -140,6 +144,11 @@ class GTT:
 		parser.add_option('--schedule_designation', default='AA', type="str",
 							  help='schedule designation (default=%default)')
 
+		parser.add_option('--percentile', default='-1', type="float",
+							  help='Percentile to tile to -- use this flag to set the percentile to < 0.90')
+
+		parser.add_option('--skip_completeness', action="store_true", help='If True, purely tiles sky map', default=False)
+
 		return(parser)
 
 	def main(self):
@@ -151,7 +160,10 @@ class GTT:
 		# If you specify a telescope that's not in the default list, you must provide the rest of the information
 		detector = None
 		is_error = False
+		is_custom_percentile = False
+		custom_percentile = None
 
+		# Check the inputs for errors...
 		if self.options.telescope_abbreviation not in self.telescope_mapping.keys():
 			print("Running for custom telescope. Checking required parameters...")
 
@@ -171,18 +183,31 @@ class GTT:
 				is_error = True
 				print("For custom telescope, `detector_height_deg` is required, and must be > 0!")
 
-			if is_error:
-				print("Exiting...")
-				return 1
-
-			detector = Detector(self.options.telescope_name, self.options.detector_width_deg, self.options.detector_height_deg)
+			if not is_error:
+				detector = Detector(self.options.telescope_name, self.options.detector_width_deg, self.options.detector_height_deg)
 		else:
 			detector = self.telescope_mapping[self.options.telescope_abbreviation]
 
 
+		if self.options.percentile > 0.9:
+			is_error = True
+			print("User-defined percentile must be <= 0.90")
+		elif self.options.percentile > 0.0:
+			is_custom_percentile = True
+			custom_percentile = self.options.percentile
+
+
+		if is_error:
+			print("Exiting...")
+			return 1
+
 		print("\n\nTelescope: `%s -- %s`, width: %s [deg]; height %s [deg]" % (self.options.telescope_abbreviation,
 			detector.name, detector.deg_width, detector.deg_height))
 		print("%s FOV area: %s" % (detector.name, (detector.deg_width * detector.deg_height)))
+
+
+		if is_custom_percentile:
+			print("\nTiling to %s percentile." % self.options.percentile)
 
 		t1 = time.time()
 		
@@ -216,6 +241,8 @@ class GTT:
 		num_px_per_field = (detector.deg_height*detector.deg_width)/area_per_px
 		print("Pix per (%s) field for '%s': %s" % (detector.name, hpx_path, num_px_per_field))
 		
+
+		percentile = self.options.percentile
 		unpacked_healpix = Unpacked_Healpix(hpx_path,
 											prob, 
 											distmu, 
@@ -226,16 +253,24 @@ class GTT:
 											npix, 
 											area_per_px, 
 											linestyle="-",
-											compute_contours=False)
+											compute_contours=False,
+											custom_percentile=custom_percentile)
 
 		num_50 = len(unpacked_healpix.indices_of_50)
 		num_90 = len(unpacked_healpix.indices_of_90)
+
 		area_50 = num_50*area_per_px
 		area_90 = num_90*area_per_px
+		
 
 		# Debug -- should match Grace DB statistics
 		print("\nArea of 50th: %s" % area_50)
 		print("Area of 90th: %s\n" % area_90)
+
+		if is_custom_percentile:
+			num_custom = len(unpacked_healpix.pixels_custom)
+			area_custom = num_custom*area_per_px
+			print("\n[User defined] Area of %s: %s\n" % (custom_percentile, area_custom))
 
 
 
@@ -251,131 +286,141 @@ class GTT:
 		with open('%s/%s_base_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
 			pickle.dump(base_cartography, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-		# Build the spatial query
-		t1 = time.time()
 
-		# Join all tiles together into a composite polygon to simplify the SQL query
-		net_polygon = []
-		for t in base_cartography.tiles:
-			net_polygon += t.query_polygon
-		joined_poly = unary_union(net_polygon)
-		
-		# Fix any seams
-		eps = 0.00001
-		merged_poly = joined_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
-		print("Number of sub-polygons in query: %s" % len(merged_poly))
+		if not self.options.skip_completeness:
+			# Build the spatial query
+			t1 = time.time()
 
-		# Create and save sql_poly
-		sql_poly = SQL_Polygon(merged_poly, detector)
-		with open('%s/%s_sql_poly.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
-			pickle.dump(sql_poly, handle, protocol=pickle.HIGHEST_PROTOCOL)
-		
-		# # Use the sql_poly string to create the WHERE clause
-		mp_where = "ST_WITHIN(Coord, ST_GEOMFROMTEXT('"
-		mp_where += sql_poly.query_polygon_string
-		mp_where += "', 4326));"
-
-		t2 = time.time()
-
-		print("\n********* start DEBUG ***********")
-		print("`Generating multipolygon` execution time: %s" % (t2 - t1))
-		print("********* end DEBUG ***********\n")
-
-		
-		# Database I/O
-		t1 = time.time()
-
-		query = "SELECT * from GalaxyDistance2 WHERE z_dist IS NOT NULL AND z_dist_err IS NOT NULL AND B IS NOT NULL AND "
-		query += mp_where
-
-		print(query)
-		print("\n*****************************\n")
-
-		# Save cartograpy
-		with open('%s/%s_query.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
-			pickle.dump(query, handle, protocol=pickle.HIGHEST_PROTOCOL)
-
-		result = QueryDB(query, port=LOCAL_PORT)
-
-		t2 = time.time()
-
-		print("\n********* start DEBUG ***********")
-		print("`Query database` execution time: %s" % (t2 - t1))
-		print("********* end DEBUG ***********\n")
-
-		# Instantiate galaxies
-		contained_galaxies = []
-
-		# What is the angular radius for our given map?
-		cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
-		pixel_diameter_arcsec = np.degrees(pixel_radius_radian)*2.0*3600.0
-		proper_radius = 20.0 # kpc
-
-		z = np.linspace(1e-18,0.3,1000)
-		arcsec_of_proper_diam = cosmo.arcsec_per_kpc_proper(z)*proper_radius*2.0
-		z_index = find_nearest(arcsec_of_proper_diam, pixel_diameter_arcsec)
-		target_z = z[z_index]
-		dist_cuttoff = cosmo.luminosity_distance(target_z).value # Mpc
-
-		print("Redshift cutoff: %s" % target_z)
-		print("Distance cutoff: %s" % dist_cuttoff)
-
-		for row in result:
-			g = glade_galaxy(row, base_cartography.unpacked_healpix, cosmo, dist_cuttoff, proper_radius)
-			contained_galaxies.append(g)
-
-		print("Query returned %s galaxies" % len(contained_galaxies))
-
-		avg_dist = average_distance_prior(base_cartography.unpacked_healpix)
-		catalog_completeness = GLADE_completeness(avg_dist)
-		print("Completeness: %s" % catalog_completeness)
+			# Join all tiles together into a composite polygon to simplify the SQL query
+			net_polygon = []
+			for t in base_cartography.tiles:
+				net_polygon += t.query_polygon
+			joined_poly = unary_union(net_polygon)
+			
+			# Fix any seams
+			eps = 0.00001
+			merged_poly = joined_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
 
 
+			try:
+				print("Number of sub-polygons in query: %s" % len(merged_poly))
+			except TypeError as e:
+				print("Warning...")
+				print(e)
+				print("\nOnly one polygons in query! Wrapping `merged_poly` and resuming...")
 
+				merged_poly = [merged_poly]
 
+			# Create and save sql_poly
+			sql_poly = SQL_Polygon(merged_poly, detector)
+			with open('%s/%s_sql_poly.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
+				pickle.dump(sql_poly, handle, protocol=pickle.HIGHEST_PROTOCOL)
+			
+			# # Use the sql_poly string to create the WHERE clause
+			mp_where = "ST_WITHIN(Coord, ST_GEOMFROMTEXT('"
+			mp_where += sql_poly.query_polygon_string
+			mp_where += "', 4326));"
 
-		### REDISTRIBUTE THE PROBABILITY IN THE MAP TO THE GALAXIES ###
+			t2 = time.time()
 
-		print("Assigning relative prob...")
-		Cartographer.assign_galaxy_relative_prob(base_cartography.unpacked_healpix, 
-												 contained_galaxies,
-												 base_cartography.cumlative_prob_in_tiles,
-												 catalog_completeness)
+			print("\n********* start DEBUG ***********")
+			print("`Generating multipolygon` execution time: %s" % (t2 - t1))
+			print("********* end DEBUG ***********\n")
 
+			
+			# Database I/O
+			t1 = time.time()
 
-		# Save contained galaxies
-		with open('%s/%s_contained_galaxies.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
-			pickle.dump(contained_galaxies, handle, protocol=pickle.HIGHEST_PROTOCOL)
+			query = "SELECT * from GalaxyDistance2 WHERE z_dist IS NOT NULL AND z_dist_err IS NOT NULL AND B IS NOT NULL AND "
+			query += mp_where
 
-		print("Redistribute prob...")
-		# redistributed_map
-		redistributed_prob, enclosed_indices = Cartographer.redistribute_probability(base_cartography.unpacked_healpix,
-																  contained_galaxies,
-																  base_cartography.tiles,
-																  catalog_completeness)
+			print(query)
+			print("\n*****************************\n")
 
-		# Copy base cartography (have to do this?) and update the prob of the 90th perecentil
-		redistributed_cartography = copy.deepcopy(base_cartography)
-		redistributed_cartography.unpacked_healpix.prob = redistributed_prob
-		redistributed_cartography.unpacked_healpix.pixels_90 = [Pixel_Element(ei, 
-																			  redistributed_cartography.unpacked_healpix.nside, 
-																			  redistributed_cartography.unpacked_healpix.prob[ei]) 
-																for ei in enclosed_indices]
-		
+			# Save cartograpy
+			with open('%s/%s_query.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
+				pickle.dump(query, handle, protocol=pickle.HIGHEST_PROTOCOL)
 
-		# Update the origiunal tiles with the new probability
-		redistributed_cartography.assign_tiles(base_cartography.tiles)
-		# Save cartograpy
-		with open('%s/%s_redstributed_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
-			pickle.dump(redistributed_cartography, handle, protocol=pickle.HIGHEST_PROTOCOL)
+			result = QueryDB(query, port=LOCAL_PORT)
+
+			t2 = time.time()
+
+			print("\n********* start DEBUG ***********")
+			print("`Query database` execution time: %s" % (t2 - t1))
+			print("********* end DEBUG ***********\n")
+
+			# Instantiate galaxies
+			contained_galaxies = []
+
+			# What is the angular radius for our given map?
+			cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
+			pixel_diameter_arcsec = np.degrees(pixel_radius_radian)*2.0*3600.0
+			proper_radius = 20.0 # kpc
+
+			z = np.linspace(1e-18,0.3,1000)
+			arcsec_of_proper_diam = cosmo.arcsec_per_kpc_proper(z)*proper_radius*2.0
+			z_index = find_nearest(arcsec_of_proper_diam, pixel_diameter_arcsec)
+			target_z = z[z_index]
+			dist_cuttoff = cosmo.luminosity_distance(target_z).value # Mpc
+
+			print("Redshift cutoff: %s" % target_z)
+			print("Distance cutoff: %s" % dist_cuttoff)
+
+			for row in result:
+				g = glade_galaxy(row, base_cartography.unpacked_healpix, cosmo, dist_cuttoff, proper_radius)
+				contained_galaxies.append(g)
+
+			print("Query returned %s galaxies" % len(contained_galaxies))
+
+			avg_dist = average_distance_prior(base_cartography.unpacked_healpix)
+			catalog_completeness = GLADE_completeness(avg_dist)
+			print("Completeness: %s" % catalog_completeness)
 
 
 
+
+
+			### REDISTRIBUTE THE PROBABILITY IN THE MAP TO THE GALAXIES ###
+
+			print("Assigning relative prob...")
+			Cartographer.assign_galaxy_relative_prob(base_cartography.unpacked_healpix, 
+													 contained_galaxies,
+													 base_cartography.cumlative_prob_in_tiles,
+													 catalog_completeness)
+
+
+			# Save contained galaxies
+			with open('%s/%s_contained_galaxies.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
+				pickle.dump(contained_galaxies, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+			print("Redistribute prob...")
+			# redistributed_map
+			redistributed_prob, enclosed_indices = Cartographer.redistribute_probability(base_cartography.unpacked_healpix,
+																	  contained_galaxies,
+																	  base_cartography.tiles,
+																	  catalog_completeness)
+
+			# Copy base cartography (have to do this?) and update the prob of the 90th perecentil
+			redistributed_cartography = copy.deepcopy(base_cartography)
+			redistributed_cartography.unpacked_healpix.prob = redistributed_prob
+			redistributed_cartography.unpacked_healpix.pixels_90 = [Pixel_Element(ei, 
+																				  redistributed_cartography.unpacked_healpix.nside, 
+																				  redistributed_cartography.unpacked_healpix.prob[ei]) 
+																	for ei in enclosed_indices]
+			
+
+			# Update the original tiles with the new probability
+			redistributed_cartography.assign_tiles(base_cartography.tiles)
+			# Save cartograpy
+			with open('%s/%s_redstributed_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'wb') as handle:
+				pickle.dump(redistributed_cartography, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+		else:
+			print("\n\nPure tiling...")
 
 
 
 		### SAVE THE RESULTS ###
-
 		def GetSexigesimalString(c):
 			ra = c.ra.hms
 			dec = c.dec.dms
@@ -391,10 +436,16 @@ class GTT:
 				dec_string = "-00:%02d:%05.2f" % (np.abs(dec[1]),np.abs(dec[2]))
 			return (ra_string, dec_string)
 
+
+		tiles_to_serialize = None
+		if not self.options.skip_completeness:
+			tiles_to_serialize = redistributed_cartography.tiles
+		else:
+			tiles_to_serialize = base_cartography.tiles
+
+
 		t1 = time.time()
-		sorted_tiles = sorted(redistributed_cartography.tiles, 
-			key=lambda x: x.net_prob, 
-			reverse=True)
+		sorted_tiles = sorted(tiles_to_serialize, key=lambda x: x.net_prob, reverse=True)
 
 		with open('%s/%s_%s_%s_Tiles.txt' % (self.options.working_dir, 
 			base_cartography.gwid, 
@@ -416,7 +467,8 @@ class GTT:
 
 			for i, st in enumerate(sorted_tiles):
 
-				coord_str = GetSexigesimalString(st.coord) 
+				c = coord.SkyCoord(st.ra_deg, st.dec_deg, unit=(u.deg, u.deg))
+				coord_str = GetSexigesimalString(c) 
 
 				cols = []
 				field_name = "%s%s%sE%s" % (self.options.telescope_abbreviation,

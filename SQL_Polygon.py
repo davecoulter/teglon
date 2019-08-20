@@ -48,6 +48,10 @@ class SQL_Polygon(Telgon_Shape):
 			multipolygon = []
 
 			for p in self.query_polygon:
+				
+				# This happens with weird contours sometimes
+				if p is None:
+					continue
 
 				mp = "(("
 				ra_deg,dec_deg = zip(*[(coord_deg[0], coord_deg[1]) for coord_deg in p.exterior.coords])

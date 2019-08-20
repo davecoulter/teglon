@@ -34,7 +34,7 @@ class Detector:
 
 class Unpacked_Healpix:
 	def __init__(self, file_name, prob, distmu, distsigma, distnorm, header, nside, 
-		npix, area_per_px, linestyle, compute_contours=True):
+		npix, area_per_px, linestyle, compute_contours=True, custom_percentile=None):
 
 		self.file_name = file_name
 		self.prob = prob
@@ -51,12 +51,19 @@ class Unpacked_Healpix:
 		self.indices_of_70 = None
 		self.indices_of_90 = None
 		self.indices_of_95 = None
+
 		self.levels = None
 		self.X = None
 		self.Y = None
 		self.Z = None
 
 		self.pixels_90 = None
+
+		# This must be < 0.9
+		self.custom_percentile = custom_percentile
+		self.indices_of_custom = None		
+		self.pixels_custom = None
+		
 		
 		print("Initializing '%s'...\n" % self.file_name)
 		self.initialize(compute_contours)
@@ -79,7 +86,7 @@ class Unpacked_Healpix:
 		_70_cut, index_70 = self.get_prob_val_and_index(sorted_prob, 0.70)
 		# 50th percentile
 		_50_cut, index_50 = self.get_prob_val_and_index(sorted_prob, 0.50)
-		
+
 		lvls = [_90_cut, _70_cut, _50_cut, max_prob]
 
 		indices_of_50 = np.where(self.prob >= _50_cut)[0]
@@ -87,7 +94,7 @@ class Unpacked_Healpix:
 		indices_of_90 = np.where(self.prob >= _90_cut)[0]
 		indices_of_95 = np.where(self.prob >= _95_cut)[0]
 		indices_of_99 = np.where(self.prob >= _99_cut)[0]
-		
+
 		self.indices_of_50 = indices_of_50
 		self.indices_of_70 = indices_of_70
 		self.indices_of_90 = indices_of_90
@@ -96,6 +103,21 @@ class Unpacked_Healpix:
 
 		self.levels = lvls
 		self.pixels_90 = [Pixel_Element(i90, self.nside, self.prob[i90]) for i90 in self.indices_of_90]
+
+
+		self.indices_of_custom = None
+
+		# Custom percentile
+		_custom_cut = None
+		index_custom = None
+		indices_of_custom = None
+		if self.custom_percentile is not None:
+			_custom_cut, index_custom = self.get_prob_val_and_index(sorted_prob, self.custom_percentile)
+			indices_of_custom = np.where(self.prob >= _custom_cut)[0]
+			self.indices_of_custom = indices_of_custom
+			self.pixels_custom = [Pixel_Element(ic, self.nside, self.prob[ic]) for ic in self.indices_of_custom]
+
+		
 
 		if compute_contours:
 			print("Computing contours for '%s'...\n" % self.file_name)
@@ -222,7 +244,8 @@ class Cartographer:
 			rescaled_npix,
 			rescaled_area_per_pix,
 			linestyle="-",
-			compute_contours=False)
+			compute_contours=False,
+			custom_percentile=unpacked_healpix.custom_percentile)
 
 		t2 = time.time()
 
@@ -424,8 +447,9 @@ class Cartographer:
 		all_sky_coords_arr = np.asarray(all_sky_coords)
 		good_coords = all_sky_coords_arr[good_indices]
 
+		# coord.SkyCoord(gc[0], gc[1], unit=(u.deg,u.deg))
 		for gc in good_coords:
-			t = Tile(coord.SkyCoord(gc[0], gc[1], unit=(u.deg,u.deg)), rescale_detector.deg_width, rescale_detector.deg_height, unpacked_healpix.nside)
+			t = Tile(gc[0], gc[1], rescale_detector.deg_width, rescale_detector.deg_height, unpacked_healpix.nside)
 			good_tiles.append(t)
 
 		t2 = time.time()
@@ -453,6 +477,7 @@ class Cartographer:
 		return cum_prob, initialized_tiles
 
 	def assign_tiles(self, input_tiles):
+		
 		t1 = time.time()
 
 		for t in input_tiles:
@@ -463,7 +488,10 @@ class Cartographer:
 		cum_prob = 0.0
 		tile_sub_set = []
 		i = 0
-		while cum_prob <= 0.90 and i < len(sorted_tiles):
+
+		prob_threshold = self.custom_percentile if self.is_custom else 0.90
+
+		while cum_prob <= prob_threshold and i < len(sorted_tiles):
 			tile_sub_set.append(sorted_tiles[i])
 			cum_prob += sorted_tiles[i].net_prob
 			i += 1
@@ -471,7 +499,8 @@ class Cartographer:
 		self.tiles = tile_sub_set
 		self.cumlative_prob_in_tiles = cum_prob
 		print("Total tiles for %s in `%s`: %s" % (self.rescale_detector.name, self.unpacked_healpix.file_name, len(self.tiles)))
-		print("Sanity check: Cumulative prob in tiles based on original pixel resolution close to 0.90? Cumulate Prob = %s" % self.cumlative_prob_in_tiles)
+		print("Sanity check: Cumulative prob in tiles based on original pixel resolution close to %s? Cumulate Prob = %s" % (self.custom_percentile, 
+			self.cumlative_prob_in_tiles))
 
 		t2 = time.time()
 		print("\n********* start DEBUG ***********")
@@ -487,30 +516,57 @@ class Cartographer:
 		self.all_sky_coords = all_sky_coords
 		self.tiles = None
 		self.cumlative_prob_in_tiles = 0.0
+		
+		self.is_custom = False
+		self.custom_percentile = None
+
+		if self.unpacked_healpix.custom_percentile is not None:
+			self.is_custom = True
+			self.custom_percentile = self.unpacked_healpix.custom_percentile
+
+		rescaled_healpix = None
 
 		if downsample_map:
 			print("Rescaling %s for %s" % (unpacked_healpix.file_name, rescale_detector.name))
 			rescaled_healpix = Cartographer.downsample_map(self.rescale_detector, self.unpacked_healpix)
 
 			# Debug
-			total_prob_rescaled_pixels_90 = np.sum([p.prob for p in rescaled_healpix.pixels_90])
-			print("Sanity check: Sum of probability in 90th percentile, rescaled pix? Sum = %s" % total_prob_rescaled_pixels_90)
+			if self.is_custom:
+				total_prob_rescaled_pixels_custom = np.sum([p.prob for p in rescaled_healpix.pixels_custom])
+				print("Sanity check: Sum of probability in %s percentile, rescaled pix? Sum = %s" % (rescaled_healpix.custom_percentile, 
+					total_prob_rescaled_pixels_custom))
+			else:
+				total_prob_rescaled_pixels_90 = np.sum([p.prob for p in rescaled_healpix.pixels_90])
+				print("Sanity check: Sum of probability in 90th percentile, rescaled pix? Sum = %s" % total_prob_rescaled_pixels_90)
 		else:
 			print("Not rescaling map...")
 
 
 		if generate_tiles:
 			print("Using all sky coords + rescaled pixels to generate tile set...")
+
+			pixels_to_compute = None
+			if self.is_custom:
+				pixels_to_compute = rescaled_healpix.pixels_custom
+			else:
+				pixels_to_compute = rescaled_healpix.pixels_90
+
+
 			cumlative_prob_in_tiles, tiles = Cartographer.generate_tiles(self.unpacked_healpix,
-				rescaled_healpix.pixels_90,
-				self.rescale_detector,
-				self.all_sky_coords)
+					pixels_to_compute,
+					self.rescale_detector,
+					self.all_sky_coords)
 
 			self.tiles = tiles
 			self.cumlative_prob_in_tiles = cumlative_prob_in_tiles
 
 			print("Total tiles for %s in `%s`: %s" % (self.rescale_detector.name, self.unpacked_healpix.file_name, len(self.tiles)))
-			print("Sanity check: Cumulative prob in tiles based on non-scaled pixels close to 0.90? Cumulate Prob = %s" % self.cumlative_prob_in_tiles)
+
+			if self.is_custom:
+				print("Sanity check: Cumulative prob in tiles based on non-scaled pixels close to %s? Cumulate Prob = %s" % (self.unpacked_healpix.custom_percentile, 
+					self.cumlative_prob_in_tiles))
+			else:
+				print("Sanity check: Cumulative prob in tiles based on non-scaled pixels close to 0.90? Cumulate Prob = %s" % self.cumlative_prob_in_tiles)
 		else:
 			print("Not processing tiles...")
 

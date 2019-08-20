@@ -145,7 +145,7 @@ def plot_probability_map(output_filename,
 	if tiles:
 		print("Plotting (%s) Tiles..." % len(tiles))
 		for i,t in enumerate(tiles):
-			t.plot(m, ax, edgecolor='k', facecolor='None', linewidth=0.25, alpha=1.0,zorder=9900)
+			t.plot(m, ax, edgecolor='r', facecolor='None', linewidth=0.25, alpha=1.0,zorder=9900)
 			if i % 1000 == 0:
 				print("Plotted %s tiles" % i)
 

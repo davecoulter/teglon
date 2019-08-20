@@ -9,9 +9,19 @@ from shapely.ops import linemerge, unary_union, polygonize, split
 from Teglon_Shape import *
 
 class Tile(Telgon_Shape):
-	def __init__(self, coord, width, height, nside, net_prob=0.0):
+	# def __init__(self, coord, width, height, nside, net_prob=0.0):
+	def __init__(self, central_ra_deg, central_dec_deg, width, height, nside, net_prob=0.0):
 		
-		self.coord = coord
+		self.id = None
+
+		# self.coord = coord
+
+		# Test
+		self.dec_deg = central_dec_deg
+		self.ra_deg = central_ra_deg
+		self.dec_rad = np.radians(central_dec_deg)
+		self.ra_rad = np.radians(central_ra_deg)
+
 		self.width = width
 		self.height = height
 
@@ -37,8 +47,8 @@ class Tile(Telgon_Shape):
 		self.__query_polygon_string = None
 
 		self.__enclosed_pixel_indices = np.array([])
-		self.N32_pixel_index = None
-		self.N32_pixel_id = None
+		self.N128_pixel_index = None
+		self.N128_pixel_id = None
 		
 	def __str__(self):
 		return str(self.__dict__)
@@ -48,22 +58,40 @@ class Tile(Telgon_Shape):
 		
 		if len(self.__corner_coords) == 0:
 		
+			# # Get correction factor:
+			# d = self.coord.dec.radian
+			# width_corr = self.width/np.abs(np.cos(d))
+
+			# # Define the tile offsets:
+			# ra_offset = coord.Angle(width_corr/2., unit=u.deg)
+			# dec_offset = coord.Angle(self.height/2., unit=u.deg)
+
+			# southern_dec = (self.coord.dec - dec_offset) if (self.coord.dec - dec_offset).degree > -90 else coord.Angle((self.coord.dec - dec_offset).degree + 0.00001, unit=u.degree)
+			# northern_dec = (self.coord.dec + dec_offset) if (self.coord.dec + dec_offset).degree < 90 else coord.Angle((self.coord.dec + dec_offset).degree - 0.00001, unit=u.degree)
+
+			# SW = coord.SkyCoord(self.coord.ra - ra_offset, southern_dec)
+			# NW = coord.SkyCoord(self.coord.ra - ra_offset, northern_dec)
+
+			# SE = coord.SkyCoord(self.coord.ra + ra_offset, southern_dec)
+			# NE = coord.SkyCoord(self.coord.ra + ra_offset, northern_dec)
+
+			# self.__corner_coords = np.asarray([SW,NW,NE,SE])
+
 			# Get correction factor:
-			d = self.coord.dec.radian
-			width_corr = self.width/np.abs(np.cos(d))
+			width_corr = self.width/np.abs(np.cos(self.dec_rad))
 
 			# Define the tile offsets:
-			ra_offset = coord.Angle(width_corr/2., unit=u.deg)
-			dec_offset = coord.Angle(self.height/2., unit=u.deg)
+			ra_offset = (width_corr/2.)
+			dec_offset = (self.height/2.)
 
-			southern_dec = (self.coord.dec - dec_offset) if (self.coord.dec - dec_offset).degree > -90 else coord.Angle((self.coord.dec - dec_offset).degree + 0.00001, unit=u.degree)
-			northern_dec = (self.coord.dec + dec_offset) if (self.coord.dec + dec_offset).degree < 90 else coord.Angle((self.coord.dec + dec_offset).degree - 0.00001, unit=u.degree)
+			southern_dec = (self.dec_deg - dec_offset) if (self.dec_deg - dec_offset) > -90 else (self.dec_deg - dec_offset + 0.00001)
+			northern_dec = (self.dec_deg + dec_offset) if (self.dec_deg + dec_offset) < 90 else (self.dec_deg + dec_offset - 0.00001)
 
-			SW = coord.SkyCoord(self.coord.ra - ra_offset, southern_dec)
-			NW = coord.SkyCoord(self.coord.ra - ra_offset, northern_dec)
+			SW = ((self.ra_deg - ra_offset), southern_dec)
+			NW = ((self.ra_deg - ra_offset), northern_dec)
 
-			SE = coord.SkyCoord(self.coord.ra + ra_offset, southern_dec)
-			NE = coord.SkyCoord(self.coord.ra + ra_offset, northern_dec)
+			SE = ((self.ra_deg + ra_offset), southern_dec)
+			NE = ((self.ra_deg + ra_offset), northern_dec)
 
 			self.__corner_coords = np.asarray([SW,NW,NE,SE])
 			
@@ -74,12 +102,23 @@ class Tile(Telgon_Shape):
 		
 		if len(self.__corner_xyz) == 0:
 		
+			# coord_vertices = self.corner_coords
+			# xyz_vertices = []
+
+			# for c in coord_vertices:
+			# 	theta = 0.5 * np.pi - np.deg2rad(c.dec.degree)
+			# 	phi = np.deg2rad(c.ra.degree)
+
+			# 	xyz_vertices.append(hp.ang2vec(theta, phi))
+
+			# self.__corner_xyz = np.asarray(xyz_vertices)
+
 			coord_vertices = self.corner_coords
 			xyz_vertices = []
 
 			for c in coord_vertices:
-				theta = 0.5 * np.pi - np.deg2rad(c.dec.degree)
-				phi = np.deg2rad(c.ra.degree)
+				theta = 0.5 * np.pi - np.deg2rad(c[1])
+				phi = np.deg2rad(c[0])
 
 				xyz_vertices.append(hp.ang2vec(theta, phi))
 
@@ -95,8 +134,12 @@ class Tile(Telgon_Shape):
 	@property # Returns list of polygon
 	def polygon(self):
 
+		# if not self.__polygon:
+		# 	tile_vertices = [[coord.ra.radian, coord.dec.radian] for coord in self.corner_coords]
+		# 	self.__polygon = geometry.Polygon(tile_vertices)
+
 		if not self.__polygon:
-			tile_vertices = [[coord.ra.radian, coord.dec.radian] for coord in self.corner_coords]
+			tile_vertices = [[np.radians(coord_tup[0]), np.radians(coord_tup[1])] for coord_tup in self.corner_coords]
 			self.__polygon = geometry.Polygon(tile_vertices)
 
 		return [self.__polygon]
