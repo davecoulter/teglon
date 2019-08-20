@@ -4,4 +4,5 @@ Scratch/*
 __pycache__/
 Observed_Tiles/*
 Settings.ini
-
+*.pkl
+*.png
