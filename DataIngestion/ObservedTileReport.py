@@ -131,14 +131,14 @@ def query_db(query_list, commit=False):
 				db.commit()
 
 			streamed_results = []
-			print("\tfetching results...")
+			print("fetching results...")
 			while True:
 				r = cursor.fetchmany(1000000)
 				count = len(r)
 				streamed_results += r
 				size_in_mb = sys.getsizeof(streamed_results)/1.0e+6
 
-				print("\t\tfetched: %s; current length: %s; running size: %0.3f MB" % (count, len(streamed_results), size_in_mb))
+				print("\tfetched: %s; current length: %s; running size: %0.3f MB" % (count, len(streamed_results), size_in_mb))
 
 				if not r or count < chunk_size:
 					break
@@ -334,17 +334,13 @@ class Teglon:
 			parser = optparse.OptionParser(usage=usage, conflict_handler="resolve")
 
 
-		parser.add_option('--gw_id', default="", type="str",
-						help='LIGO superevent name, e.g. `S190425z` ')
+		parser.add_option('--gw_id', default="", type="str", help='LIGO superevent name, e.g. `S190425z`.')
+
+		parser.add_option('--healpix_file', default="", type="str", help='Healpix filename. Used with `gw_id` to identify unique map.')
 
 		parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",help='Directory for where to look for the healpix file.')
 
-		parser.add_option('--healpix_file', default="", type="str", help='Healpix filename.')
-
-		parser.add_option('--candidate_file', default="", type="str", help='Filename of candidates to cross-reference.')
-
-	
-
+		parser.add_option('--output_dir', default="../Events/{GWID}/ObservedTiles/TileStats", type="str", help='Directory for where to look for observed tiles to import.')
 
 		return(parser)
 
@@ -361,155 +357,167 @@ class Teglon:
 		if "{GWID}" in formatted_healpix_dir:
 			formatted_healpix_dir = formatted_healpix_dir.replace("{GWID}", self.options.gw_id)
 
+		formatted_output_dir = self.options.output_dir
+		if "{GWID}" in formatted_output_dir:
+			formatted_output_dir = formatted_output_dir.replace("{GWID}", self.options.gw_id)
 
 		hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
-		candidate_file_path = "%s/Candidates/%s" % (formatted_healpix_dir, self.options.candidate_file)
-
-		target_file_name = candidate_file_path.split('/')[-1].split(".")[0]
-		print("Target File name: %s" % target_file_name)
-
-
-		resolved_candidate_file_path = "%s/Candidates/%s" % (formatted_healpix_dir, target_file_name + "_resolved.txt")
 
 		if self.options.healpix_file == "":
 			is_error = True
 			print("You must specify which healpix file to process.")
 
-		if self.options.candidate_file == "":
-			is_error = True
-			print("You must specify which candidate file to process.")
-
-
 		if is_error:
 			print("Exiting...")
 			return 1
-	
+
+		
 		# Get Map ID
 		healpix_map_select = "SELECT id, NSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
-		healpix_map_id = query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0]
-		healpix_map_nside = query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][1]
+		healpix_map_id = int(query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0])
+		healpix_map_nside = int(query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][1])
 		
-		candidates = []
-		tile_select = '''
-			SELECT id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id 
-			FROM StaticTile 
-			WHERE Detector_id = %s and 
-				st_contains(Poly, ST_GeomFromText('POINT(%s %s)', 4326));
+		# Get all conposed observed tiles for this map
+		observed_tile_select = '''
+			SELECT 
+				ot.id as ObservedTile_id, 
+				ot.FieldName, 
+				ot.RA, 
+				ot._Dec, 
+				ot.MJD, 
+				ot.Exp_Time, 
+				ot.Mag_Lim, 
+				d.Name as Detector_Name, 
+				ot.EBV, 
+				b.Name as Band_Name, 
+				ot.EBV*b.F99_Coefficient as A_lambda, 
+				SUM(hp.Prob) as LIGO_2D_Tile_Prob, 
+				SUM(hpc.Renorm2DProb) as Renorm_2D_Tile_Prob, 
+				SUM(hpc.NetPixelProb) as Teglon_4D_Tile_Prob, # This should equal the contribution from the galaxies + redistributed prob
+				AVG(hpc.PixelCompleteness) as Avg_Tile_Completeness, 
+				AVG(hp.Mean) as Avg_LIGO_Distance 
+			FROM ObservedTile ot 
+			JOIN Detector d on d.id = ot.Detector_id 
+			JOIN Band b on b.id = ot.Band_id 
+			JOIN ObservedTile_HealpixPixel ot_hp on ot_hp.ObservedTile_id = ot.id 
+			JOIN HealpixPixel hp on hp.id = ot_hp.HealpixPixel_id 
+			JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp.id 
+			WHERE ot.HealpixMap_id = %s 
+			GROUP BY 
+				ot.id, 
+				ot.FieldName, 
+				ot.RA, 
+				ot._Dec, 
+				ot.MJD, 
+				ot.Exp_Time, 
+				ot.Mag_Lim, 
+				d.Name, 
+				ot.EBV, 
+				b.Name, 
+				ot.EBV*b.F99_Coefficient 
+			ORDER BY ot.id 
 		'''
+		observed_tile_result = query_db([observed_tile_select % healpix_map_id])[0]
 
-		_2d_prob_percentile = '''
-			SELECT SUM(hp.Prob)
-			FROM HealpixPixel hp
-			WHERE
-				hp.HealpixMap_id = %s AND
-				hp.Prob >= 
-					(SELECT _hp.Prob 
-					FROM HealpixPixel _hp
-					WHERE _hp.Pixel_Index = %s and _hp.HealpixMap_id = %s)
-			ORDER BY hp.Prob DESC;
-		'''
 
-		_4d_prob_percentile = '''
-			SELECT SUM(hpc.NetPixelProb)
-			FROM HealpixPixel_Completeness hpc
+		observed_tile_galaxy_select = '''
+			SELECT
+				ot.id as ObservedTile_id, 
+				ot.FieldName, 
+				ot.RA as ObservedTile_RA, 
+				ot._Dec as ObservedTile_Dec, 
+				hp.id as HealpixPixel_id, 
+				gd2.id as Galaxy_id, 
+				gd2.RA as Galaxy_RA, 
+				gd2._Dec as Galaxy_Dec, 
+				gd2.PGC, 
+				gd2.Name_GWGC, 
+				gd2.Name_HyperLEDA, 
+				gd2.Name_2MASS, 
+				gd2.Name_SDSS_DR12, 
+				hp_gd2_w.GalaxyProb as Galaxy_4D_Prob, 
+				gd2.z, 
+				gd2.z_dist, 
+				gd2.z_dist_err, 
+				gd2.B, 
+				gd2.K 
+			FROM 
+				GalaxyDistance2 gd2 
+			JOIN 
+				HealpixPixel_GalaxyDistance2 hp_gd2 on  hp_gd2.GalaxyDistance2_id = gd2.id 
+			JOIN 
+				HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
+			JOIN 
+				HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
+			JOIN 
+				HealpixMap hm on hm.id = hp.HealpixMap_id 
+			JOIN 
+				ObservedTile_HealpixPixel ot_hp on ot_hp.HealpixPixel_id = hp.id 
+			JOIN 
+				ObservedTile ot on ot.id = ot_hp.ObservedTile_id 
 			WHERE 
-				hpc.HealpixMap_id = %s AND 
-			    hpc.NetPixelProb >= 
-				(SELECT _hpc.NetPixelProb 
-				FROM HealpixPixel _hp
-				JOIN HealpixPixel_Completeness _hpc on _hpc.HealpixPixel_id = _hp.id
-				WHERE _hp.Pixel_Index = %s AND _hp.HealpixMap_id = %s)
-			ORDER BY hpc.NetPixelProb DESC;
-
+				ot.id = %s
 		'''
-
-		SWOPE_id = 1
-		THACHER_id = 3
-		candidates = []
-		with open(candidate_file_path,'r') as csvfile:
-
-			# csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-			csvreader = csv.reader(csvfile, delimiter='\t',skipinitialspace=True)
-			# next(csvreader)
-
-			for row in csvreader:
-				print(row)
-				# name = row[0]
-				# ra = row[1]
-				# dec = row[2]
-				# mag = row[4]
-
-				# print("Processing `%s`" % name)
-
-				# c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
-				# swope_tile = query_db([tile_select % (SWOPE_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
-				# thacher_tile = query_db([tile_select % (THACHER_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
-
-				# pixel_index = hp.ang2pix(int(healpix_map_nside), 0.5*np.pi - c.dec.radian, c.ra.radian)
-				# _2d = query_db([_2d_prob_percentile % pixel_index])[0][0][0]
-				# _4d = query_db([_4d_prob_percentile % pixel_index])[0][0][0]
-
-				# t = (name, ra, dec, c.ra.degree, c.dec.degree, healpix_map_nside, pixel_index, swope_tile[2], thacher_tile[2], mag, _2d, _4d)
-				# candidates.append(t)
+		for ot in observed_tile_result:
+			ot_id = ot[0]
+			observed_tile_galaxy_result = query_db([observed_tile_galaxy_select % ot_id])[0]
 
 
+			field_name = ot[1]
+			csv_file_name = "%s_%s.txt" % (ot_id, field_name)
+			csv_file_path = "%s/%s" % (formatted_output_dir, csv_file_name)
 
-				name = row[0]
-				ra = row[1]
-				dec = row[2]
-				c = coord.SkyCoord(ra, dec, unit=(u.deg, u.deg))
-				# c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
+			print("Creating `%s`" % csv_file_path)
+			with open(csv_file_path,'w') as file:
 
+				# Write key-value pairs from the tile to the CSV
+				file.write("ID:\t%s\n" % ot[0])
+				file.write("OBJECT:\t%s\n" % ot[1])
+				file.write("RA:\t%s\n" % ot[2])
+				file.write("DEC:\t%s\n" % ot[3])
+				file.write("MJD:\t%s\n" % ot[4])
+				file.write("EXPTM:\t%s\n" % ot[5])
+				file.write("INSTR:\t%s\n" % ot[7])
+				file.write("FILTER:\t%s\n" % ot[9])
+				file.write("EBV:\t%s\n" % ot[8])
+				file.write("MWE:\t%s\n" % ot[10])
+				file.write("LIMMAG:\t%s\n" % ot[6])
+				file.write("NET2D:\t%s\n" % ot[11])
+				file.write("RDST2D:\t%s\n" % ot[12])
+				file.write("NET4D:\t%s\n" % ot[13])
+				file.write("PXDIST:\t%s\n" % ot[15])
+				file.write("PXCOMP:\t%s\n" % ot[14])
+				file.write("\n----------------------Contained Galaxies-------------------------\n\n")
+				file.write("Galaxy_ID, Galaxy_RA, Galaxy_Dec, PGC, Name_GWGC, Name_HyperLEDA, Name_2MASS, Name_SDSS_DR12, Galaxy_4D_Prob, z, z_Dist, z_Dist_Err, B, K\n")
+				csvwriter = csv.writer(file)
+				for otgr in observed_tile_galaxy_result:
 
-				# name = row[2]
-				# ra = row[3]
-				# dec = row[4]
-				# c = coord.SkyCoord(ra, dec, unit=(u.deg, u.deg))
-
-				print("Processing `%s`" % name)
-
-				swope_tile = query_db([tile_select % (SWOPE_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
-				thacher_tile = query_db([tile_select % (THACHER_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
-
-				pixel_index = hp.ang2pix(int(healpix_map_nside), 0.5*np.pi - c.dec.radian, c.ra.radian)
-				_2d = query_db([_2d_prob_percentile % (healpix_map_id, pixel_index, healpix_map_id)])[0][0][0]
-				_4d = query_db([_4d_prob_percentile % (healpix_map_id, pixel_index, healpix_map_id)])[0][0][0]
-
-				t = (name, ra, dec, c.ra.degree, c.dec.degree, healpix_map_nside, pixel_index, swope_tile[2], thacher_tile[2], _2d, _4d)
-				candidates.append(t)
-				
-	
-		with open(resolved_candidate_file_path,'w') as csvfile:
-			csvwriter = csv.writer(csvfile)
-
-			cols = []
-			cols.append('# Name')
-			cols.append('RA')
-			cols.append('Dec')
-			cols.append('RA_deg')
-			cols.append('Dec_deg')
-			cols.append('Map_NSIDE')
-			cols.append('Pixel_Index')
-			cols.append('Swope_Tile')
-			cols.append('Thacher_Tile')
-			# cols.append('Current_Mag')
-			cols.append('2D_Percentile')
-			cols.append('Teglon_Percentile')
-			csvwriter.writerow(cols)
-
-			for i, row in enumerate(candidates):
-				csvwriter.writerow(row)
-			
-		print("Done.")
+					csvwriter.writerow((otgr[5], 
+						otgr[6], 
+						otgr[7], 
+						otgr[8], 
+						otgr[9], 
+						otgr[10], 
+						otgr[11], 
+						otgr[12], 
+						otgr[13], 
+						otgr[14], 
+						otgr[15], 
+						otgr[16], 
+						otgr[17], 
+						otgr[18]))
 
 
 
 if __name__ == "__main__":
 	
-	useagestring="""python TileCandidatesMap.py [options]
+	useagestring="""python Generate_Tiles.py [options]
 
 Example with healpix_dir defaulted to 'Events/<gwid>':
-python TileCandidatesMap.py --gw_id <gwid> --healpix_file <filename> --candidate_file <filename>
+python LoadMap.py --gw_id <>gwid --healpix_file <filename>
+
+Example with healpix_dir specified:
+python LoadMap.py --gw_id <gwid> --healpix_dir Events/<directory name> --healpix_file <filename>
 """
 	
 	start = time.time()
@@ -524,7 +532,7 @@ python TileCandidatesMap.py --gw_id <gwid> --healpix_file <filename> --candidate
 	end = time.time()
 	duration = (end - start)
 	print("\n********* start DEBUG ***********")
-	print("Teglon `TileCandidatesMap` execution time: %s" % duration)
+	print("Teglon `LoadObservedTiles` execution time: %s" % duration)
 	print("********* end DEBUG ***********\n")
 
 

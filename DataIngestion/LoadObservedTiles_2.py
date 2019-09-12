@@ -131,14 +131,14 @@ def query_db(query_list, commit=False):
 				db.commit()
 
 			streamed_results = []
-			print("\tfetching results...")
+			print("fetching results...")
 			while True:
 				r = cursor.fetchmany(1000000)
 				count = len(r)
 				streamed_results += r
 				size_in_mb = sys.getsizeof(streamed_results)/1.0e+6
 
-				print("\t\tfetched: %s; current length: %s; running size: %0.3f MB" % (count, len(streamed_results), size_in_mb))
+				print("\tfetched: %s; current length: %s; running size: %0.3f MB" % (count, len(streamed_results), size_in_mb))
 
 				if not r or count < chunk_size:
 					break
@@ -334,17 +334,13 @@ class Teglon:
 			parser = optparse.OptionParser(usage=usage, conflict_handler="resolve")
 
 
-		parser.add_option('--gw_id', default="", type="str",
-						help='LIGO superevent name, e.g. `S190425z` ')
+		parser.add_option('--gw_id', default="", type="str", help='LIGO superevent name, e.g. `S190425z`.')
+
+		parser.add_option('--healpix_file', default="", type="str", help='Healpix filename. Used with `gw_id` to identify unique map.')
 
 		parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",help='Directory for where to look for the healpix file.')
 
-		parser.add_option('--healpix_file', default="", type="str", help='Healpix filename.')
-
-		parser.add_option('--candidate_file', default="", type="str", help='Filename of candidates to cross-reference.')
-
-	
-
+		parser.add_option('--tile_dir', default="../Events/{GWID}/ObservedTiles", type="str", help='Directory for where to look for observed tiles to import.')
 
 		return(parser)
 
@@ -361,155 +357,255 @@ class Teglon:
 		if "{GWID}" in formatted_healpix_dir:
 			formatted_healpix_dir = formatted_healpix_dir.replace("{GWID}", self.options.gw_id)
 
+		formatted_tile_dir = self.options.tile_dir
+		if "{GWID}" in formatted_tile_dir:
+			formatted_tile_dir = formatted_tile_dir.replace("{GWID}", self.options.gw_id)
 
 		hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
-		candidate_file_path = "%s/Candidates/%s" % (formatted_healpix_dir, self.options.candidate_file)
-
-		target_file_name = candidate_file_path.split('/')[-1].split(".")[0]
-		print("Target File name: %s" % target_file_name)
 
 
-		resolved_candidate_file_path = "%s/Candidates/%s" % (formatted_healpix_dir, target_file_name + "_resolved.txt")
+		print(formatted_tile_dir)
+
+
+
+		tile_files = []
+		for file in os.listdir(formatted_tile_dir):
+			if file.endswith(".dat"):
+				tile_files.append("%s/%s" % (formatted_tile_dir, file))
+
+		if len(tile_files) <= 0:
+			is_error = True
+			print("There are no tiles to process.")
 
 		if self.options.healpix_file == "":
 			is_error = True
 			print("You must specify which healpix file to process.")
 
-		if self.options.candidate_file == "":
-			is_error = True
-			print("You must specify which candidate file to process.")
-
-
 		if is_error:
 			print("Exiting...")
 			return 1
 	
+		# Band abbreviation, band_id mapping
+		band_mapping = {
+			"r":"SDSS r",
+			"i":"SDSS i"
+		}
+
+		detector_mapping = {
+			"s":"SWOPE",
+			"t":"THACHER",
+			"a":"ANDICAM",
+			"n":"NICKEL"
+		}
+
+		print("\tLoading NSIDE 128 pixels...")
+		nside128 = 128
+		N128_dict = None
+		with open('N128_dict.pkl', 'rb') as handle:
+			N128_dict = pickle.load(handle)
+		del handle
+
+		print("\tLoading existing EBV...")
+		ebv = None
+		with open('ebv.pkl', 'rb') as handle:
+			ebv = pickle.load(handle)
+
 		# Get Map ID
 		healpix_map_select = "SELECT id, NSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
-		healpix_map_id = query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0]
-		healpix_map_nside = query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][1]
+		healpix_map_id = int(query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0])
+		healpix_map_nside = int(query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][1])
 		
-		candidates = []
-		tile_select = '''
-			SELECT id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id 
-			FROM StaticTile 
-			WHERE Detector_id = %s and 
-				st_contains(Poly, ST_GeomFromText('POINT(%s %s)', 4326));
-		'''
+		print("Get map pixel")
+		map_pixel_select = "SELECT id, HealpixMap_id, Pixel_Index, Prob, Distmu, Distsigma, Distnorm, Mean, Stddev, Norm, N128_SkyPixel_id FROM HealpixPixel WHERE HealpixMap_id = %s;"
+		q = map_pixel_select % healpix_map_id
+		map_pixels = query_db([q])[0]
+		print("Retrieved %s map pixels..." % len(map_pixels))
 
-		_2d_prob_percentile = '''
-			SELECT SUM(hp.Prob)
-			FROM HealpixPixel hp
-			WHERE
-				hp.HealpixMap_id = %s AND
-				hp.Prob >= 
-					(SELECT _hp.Prob 
-					FROM HealpixPixel _hp
-					WHERE _hp.Pixel_Index = %s and _hp.HealpixMap_id = %s)
-			ORDER BY hp.Prob DESC;
-		'''
-
-		_4d_prob_percentile = '''
-			SELECT SUM(hpc.NetPixelProb)
-			FROM HealpixPixel_Completeness hpc
-			WHERE 
-				hpc.HealpixMap_id = %s AND 
-			    hpc.NetPixelProb >= 
-				(SELECT _hpc.NetPixelProb 
-				FROM HealpixPixel _hp
-				JOIN HealpixPixel_Completeness _hpc on _hpc.HealpixPixel_id = _hp.id
-				WHERE _hp.Pixel_Index = %s AND _hp.HealpixMap_id = %s)
-			ORDER BY hpc.NetPixelProb DESC;
-
-		'''
-
-		SWOPE_id = 1
-		THACHER_id = 3
-		candidates = []
-		with open(candidate_file_path,'r') as csvfile:
-
-			# csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-			csvreader = csv.reader(csvfile, delimiter='\t',skipinitialspace=True)
-			# next(csvreader)
-
-			for row in csvreader:
-				print(row)
-				# name = row[0]
-				# ra = row[1]
-				# dec = row[2]
-				# mag = row[4]
-
-				# print("Processing `%s`" % name)
-
-				# c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
-				# swope_tile = query_db([tile_select % (SWOPE_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
-				# thacher_tile = query_db([tile_select % (THACHER_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
-
-				# pixel_index = hp.ang2pix(int(healpix_map_nside), 0.5*np.pi - c.dec.radian, c.ra.radian)
-				# _2d = query_db([_2d_prob_percentile % pixel_index])[0][0][0]
-				# _4d = query_db([_4d_prob_percentile % pixel_index])[0][0][0]
-
-				# t = (name, ra, dec, c.ra.degree, c.dec.degree, healpix_map_nside, pixel_index, swope_tile[2], thacher_tile[2], mag, _2d, _4d)
-				# candidates.append(t)
+		# Initialize map pix dict for later access
+		map_pixel_dict = {}
+		for p in map_pixels:
+			map_pixel_dict[int(p[2])] = p
 
 
-
-				name = row[0]
-				ra = row[1]
-				dec = row[2]
-				c = coord.SkyCoord(ra, dec, unit=(u.deg, u.deg))
-				# c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
-
-
-				# name = row[2]
-				# ra = row[3]
-				# dec = row[4]
-				# c = coord.SkyCoord(ra, dec, unit=(u.deg, u.deg))
-
-				print("Processing `%s`" % name)
-
-				swope_tile = query_db([tile_select % (SWOPE_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
-				thacher_tile = query_db([tile_select % (THACHER_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
-
-				pixel_index = hp.ang2pix(int(healpix_map_nside), 0.5*np.pi - c.dec.radian, c.ra.radian)
-				_2d = query_db([_2d_prob_percentile % (healpix_map_id, pixel_index, healpix_map_id)])[0][0][0]
-				_4d = query_db([_4d_prob_percentile % (healpix_map_id, pixel_index, healpix_map_id)])[0][0][0]
-
-				t = (name, ra, dec, c.ra.degree, c.dec.degree, healpix_map_nside, pixel_index, swope_tile[2], thacher_tile[2], _2d, _4d)
-				candidates.append(t)
-				
-	
-		with open(resolved_candidate_file_path,'w') as csvfile:
-			csvwriter = csv.writer(csvfile)
-
-			cols = []
-			cols.append('# Name')
-			cols.append('RA')
-			cols.append('Dec')
-			cols.append('RA_deg')
-			cols.append('Dec_deg')
-			cols.append('Map_NSIDE')
-			cols.append('Pixel_Index')
-			cols.append('Swope_Tile')
-			cols.append('Thacher_Tile')
-			# cols.append('Current_Mag')
-			cols.append('2D_Percentile')
-			cols.append('Teglon_Percentile')
-			csvwriter.writerow(cols)
-
-			for i, row in enumerate(candidates):
-				csvwriter.writerow(row)
+		band_select = "SELECT id, Name, F99_Coefficient FROM Band WHERE `Name`='%s'"
+		detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec FROM Detector WHERE Name='%s'"
+		
+		print("Processing %s tiles" % len(tile_files))
+		# observed_tiles = []
+		obs_tile_insert_data = []
+		detectors = {}
+		# iterate over tiles in tile_files
+		for tf in tile_files:
 			
-		print("Done.")
+			# Read Tile File CSV and get the telescope (by file naming convention)
+			file_name = tf.split("/")[-1]
+			tele_abbr = file_name.split("_")[0]
+			tele_name = detector_mapping[tele_abbr]
+
+			detector_result = query_db([detector_select_by_name % tele_name])[0][0]
+			detector = Detector(detector_result[1], float(detector_result[2]), float(detector_result[2]))
+			detector.id = int(detector_result[0])
+			detector.area = float(detector_result[5])
+
+			if detector.name not in detectors:
+				detectors[detector.name] = detector
+			print("Processing `%s` for %s" % (file_name, detector.name))
+		
+			with open(tf,'r') as csvfile:
+
+				# Read CSV lines
+				csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
+				
+				for row in csvreader:
+
+					file_name = row[0]
+					field_name = row[1]
+					ra = float(row[2])
+					dec = float(row[3])
+					# ra = row[2]
+					# dec = row[3]
+					exp_time = float(row[4])
+					mjd = float(row[5])
+					band = row[6]
+					mag_lim = float(row[7]) if row[7] != '___' else None
+					# mag_lim = None
+
+					# Get Band_id
+					band_map = band_mapping[band]
+					band_results = query_db([band_select % band_map])[0][0]
+
+					band_id = band_results[0]
+					band_name = band_results[1]
+					band_F99 = float(band_results[2])
+
+					c = coord.SkyCoord(ra, dec, unit=(u.deg, u.deg))
+					# c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
+					n128_index = hp.ang2pix(nside128, 0.5*np.pi - c.dec.radian, c.ra.radian) # theta, phi
+					n128_id = N128_dict[n128_index]
+
+					t = Tile(c.ra.degree, c.dec.degree, detector.deg_width, detector.deg_height, int(healpix_map_nside))
+					t.field_name = field_name
+					t.N128_pixel_id = n128_id
+					t.N128_pixel_index = n128_index
+					t.mwe = ebv[n128_index]*band_F99
+					t.mjd = mjd
+					t.exp_time = exp_time
+					t.mag_lim = mag_lim
+
+					# observed_tiles.append(t)
+					obs_tile_insert_data.append((
+						detector.id, 
+						t.field_name, 
+						t.ra_deg,
+						t.dec_deg, 
+						"POINT(%s %s)" % (t.dec_deg, t.ra_deg - 180.0),  # Dec, RA order due to MySQL convention for lat/lon
+						t.query_polygon_string,
+						str(t.mwe), 
+						t.N128_pixel_id,
+						band_id,
+						t.mjd,
+						t.exp_time,
+						t.mag_lim,
+						healpix_map_id))
+
+		insert_observed_tile = '''
+			INSERT INTO 
+				ObservedTile (Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id) 
+			VALUES (%s, %s, %s, %s, ST_PointFromText(%s, 4326), ST_GEOMFROMTEXT(%s, 4326), %s, %s, %s, %s, %s, %s, %s)
+		'''
+
+		print("Inserting %s tiles..." % len(obs_tile_insert_data))
+		batch_insert(insert_observed_tile, obs_tile_insert_data)
+		print("Done...")
+
+		# Associate map pixels with observed tiles
+		print("Building observed tile-healpix map pixel relation...")
+
+		obs_tile_select = '''
+			SELECT id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id 
+			FROM ObservedTile 
+			WHERE Detector_id = %s and HealpixMap_id = %s 
+		'''
+
+		# Obtain the tile with id's so they can be used in later INSERTs
+		tile_pixel_data = []
+		for d_name, d in detectors.items():
+			obs_tiles_for_detector = query_db([obs_tile_select % (d.id, healpix_map_id)])[0]
+
+			print("Observed Tiles for %s: %s" % (d.name, len(obs_tiles_for_detector)))
+			for otfd in obs_tiles_for_detector:
+
+				ot_id = int(otfd[0])
+				ra = float(otfd[3])
+				dec = float(otfd[4])
+				t = Tile(ra, dec, d.deg_width, d.deg_height, healpix_map_nside)
+				t.id = ot_id
+
+				for p in t.enclosed_pixel_indices:
+					tile_pixel_data.append((t.id, map_pixel_dict[p][0]))
+
+		print("Length of tile_pixel_data: %s" % len(tile_pixel_data))
+
+		tile_pixel_upload_csv = "%s/ObservedTiles/%s_tile_pixel_upload.csv" % (formatted_healpix_dir, detector.name)
+
+			
+		# Create CSV
+		try:
+			t1 = time.time()
+			print("Creating `%s`" % tile_pixel_upload_csv)
+			with open(tile_pixel_upload_csv,'w') as csvfile:
+				csvwriter = csv.writer(csvfile)
+				for data in tile_pixel_data:
+					csvwriter.writerow(data)
+
+			t2 = time.time()
+			print("\n********* start DEBUG ***********")
+			print("Tile-Pixel CSV creation execution time: %s" % (t2 - t1))
+			print("********* end DEBUG ***********\n")
+		except Error as e:
+			print("Error in creating Tile-Pixel CSV:\n")
+			print(e)
+			print("\nExiting")
+			return 1
+		
+		# clean up
+		print("freeing `tile_pixel_data`...")
+		del tile_pixel_data
+
+		print("Bulk uploading `tile_pixel_data`...")
+		ot_hp_upload_sql = """LOAD DATA LOCAL INFILE '%s' 
+					INTO TABLE ObservedTile_HealpixPixel 
+					FIELDS TERMINATED BY ',' 
+					LINES TERMINATED BY '\n' 
+					(ObservedTile_id, HealpixPixel_id);"""
+
+		success = bulk_upload(ot_hp_upload_sql % tile_pixel_upload_csv)
+		if not success:
+			print("\nUnsuccessful bulk upload. Exiting...")
+			return 1
+
+		try:
+			print("Removing `%s`..." % tile_pixel_upload_csv)
+			os.remove(tile_pixel_upload_csv)
+
+			print("... Done")
+		except Error as e:
+			print("Error in file removal")
+			print(e)
+			print("\nExiting")
+			return 1
 
 
 
 if __name__ == "__main__":
 	
-	useagestring="""python TileCandidatesMap.py [options]
+	useagestring="""python Generate_Tiles.py [options]
 
 Example with healpix_dir defaulted to 'Events/<gwid>':
-python TileCandidatesMap.py --gw_id <gwid> --healpix_file <filename> --candidate_file <filename>
+python LoadMap.py --gw_id <>gwid --healpix_file <filename>
+
+Example with healpix_dir specified:
+python LoadMap.py --gw_id <gwid> --healpix_dir Events/<directory name> --healpix_file <filename>
 """
 	
 	start = time.time()
@@ -524,7 +620,7 @@ python TileCandidatesMap.py --gw_id <gwid> --healpix_file <filename> --candidate
 	end = time.time()
 	duration = (end - start)
 	print("\n********* start DEBUG ***********")
-	print("Teglon `TileCandidatesMap` execution time: %s" % duration)
+	print("Teglon `LoadObservedTiles` execution time: %s" % duration)
 	print("********* end DEBUG ***********\n")
 
 

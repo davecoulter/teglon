@@ -14,12 +14,12 @@ from Teglon_Shape import *
 
 
 class Pixel_Element(Telgon_Shape):
-	def __init__(self,index,nside,prob):
+	def __init__(self,index,nside,prob, pixel_id = None):
 		
 		self.tile_references = []
 		
 		# Properties
-		self.id = None
+		self.id = pixel_id
 		self.__index = index
 		self.__nside = nside
 		self.__coord = None
@@ -134,11 +134,17 @@ class Pixel_Element(Telgon_Shape):
 		# Sanity
 		if nside_out < self.nside:
 			raise("Can't get enclosed pixel indices for lower resolution pixels!")
-		
+
 		if len(self.__epi) == 0:
+
+			# Start with the central pixel, in case the size of the FOV is <= the pixel size
+			self.__epi = np.asarray([hp.ang2pix(self.nside, 0.5*np.pi - self.__coord.dec.radian, self.__coord.ra.radian)])
+
 			pixel_xyz_vertices = hp.boundaries(self.nside, pix=self.index)
 			internal_pix = hp.query_polygon(nside_out, pixel_xyz_vertices, inclusive=False)
-			self.__epi = internal_pix
+
+			if len(internal_pix) > 0:
+				self.__epi = internal_pix
 			
 		return self.__epi
 	

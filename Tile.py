@@ -10,9 +10,9 @@ from Teglon_Shape import *
 
 class Tile(Telgon_Shape):
 	# def __init__(self, coord, width, height, nside, net_prob=0.0):
-	def __init__(self, central_ra_deg, central_dec_deg, width, height, nside, net_prob=0.0):
+	def __init__(self, central_ra_deg, central_dec_deg, width, height, nside, net_prob=0.0, tile_id = None):
 		
-		self.id = None
+		self.id = tile_id
 
 		# self.coord = coord
 
@@ -28,6 +28,9 @@ class Tile(Telgon_Shape):
 		self.nside = nside
 		self.net_prob = net_prob
 		self.mwe = 0.0
+		self.mjd = None
+		self.mag_lim = None
+		self.exp_time = None
 
 		# Gets set after construction
 		self.field_name = None
@@ -190,8 +193,14 @@ class Tile(Telgon_Shape):
 	def enclosed_pixel_indices(self):
 		
 		if len(self.__enclosed_pixel_indices) == 0:
+			
+			# Start with the central pixel, in case the size of the FOV is <= the pixel size
+			self.__enclosed_pixel_indices = np.asarray([hp.ang2pix(self.nside, 0.5*np.pi - self.dec_rad, self.ra_rad)])
 			internal_pix = hp.query_polygon(self.nside, self.corner_xyz, inclusive=False)
-			self.__enclosed_pixel_indices = internal_pix
+
+			# However, if there is at least one pixel returned from query_polygon, use that array
+			if len(internal_pix) > 0:
+				self.__enclosed_pixel_indices = internal_pix
 			
 		return self.__enclosed_pixel_indices
 	

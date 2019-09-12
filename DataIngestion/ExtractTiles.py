@@ -315,6 +315,7 @@ healpix_map_select = '''
 	SELECT id, GWID, URL, Filename, NSIDE, t_0, SubmissionTime, NetProbToGalaxies FROM HealpixMap WHERE GWID='%s' and Filename='%s'
 '''
 
+# and st.RA BETWEEN 180.0 and 315
 # Get Teglon 90th percentile
 tile_select = '''
 	SELECT 
@@ -352,7 +353,10 @@ tile_select = '''
 			JOIN HealpixPixel hp on hp.id = hpc.HealpixPixel_id
 			JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = st.N128_SkyPixel_id
 			JOIN Detector d on d.id = st.Detector_id 
-			where d.id = %s and st._Dec BETWEEN -60.0 and 0.0 and st.RA BETWEEN 0.0 and 45.0 and sp_ebv.EBV*%s < 0.5 and hp.HealpixMap_id = %s
+			where d.id = %s and 
+					-- st._Dec BETWEEN d.MinDec and d.MaxDec and 
+					sp_ebv.EBV*%s < 0.5 and 
+					hp.HealpixMap_id = %s
 			group by
 				st.id,
 				st.FieldName, 
@@ -368,7 +372,7 @@ tile_select = '''
 			t.mean_pixel_dist,
 			t.A_lambda
 		order by t.net_prob desc) tt
-		WHERE tt.cum_prob < 0.90;
+		WHERE tt.cum_prob < 0.51;
 '''
 
 # Get 2D 50th percentile
@@ -436,10 +440,10 @@ detector_select = '''
 '''
 
 
-map_result = query_db([healpix_map_select % ("S190814bv","LALInference.v1.fits.gz,0")])[0][0]
+map_result = query_db([healpix_map_select % ("S190901ap","LALInference.v2.fits.gz,0")])[0][0]
 band_result = query_db([band_select % ("SDSS r")])[0][0]
 SWOPE_detector_result = query_db([detector_select % ("SWOPE")])[0][0]
-THACHER_detector_result = query_db([detector_select % ("THACHER")])[0][0]
+# THACHER_detector_result = query_db([detector_select % ("THACHER")])[0][0]
 
 
 swope_tile_q = tile_select % (SWOPE_detector_result[0], band_result[3], map_result[0])
@@ -461,7 +465,7 @@ def GetSexigesimalString(c):
 		dec_string = "-00:%02d:%05.2f" % (np.abs(dec[1]),np.abs(dec[2]))
 	return (ra_string, dec_string)
 
-with open('../Events/S190814bv/S190814bv_SWOPE_LALInference_4D_90th.txt','w') as csvfile:
+with open('../Events/S190901ap/S190901ap_SWOPE_bayestar_4D_50th_LALInferencev2.txt','w') as csvfile:
 
 	csvwriter = csv.writer(csvfile)
 
@@ -488,50 +492,50 @@ with open('../Events/S190814bv/S190814bv_SWOPE_LALInference_4D_90th.txt','w') as
 		cols.append(coord_str[1])
 		cols.append("SWOPE")
 		cols.append("r")
-		cols.append("60")
+		cols.append("120")
 		cols.append(row[4])
 		cols.append('False')
 		csvwriter.writerow(cols)
 
 	print("Done w/ Swope")
 
-thacher_tile_q = tile_select % (THACHER_detector_result[0], band_result[3], map_result[0])
-THACHER_tile_result = query_db([thacher_tile_q])[0]
+# thacher_tile_q = tile_select % (THACHER_detector_result[0], band_result[3], map_result[0])
+# THACHER_tile_result = query_db([thacher_tile_q])[0]
 
 
-with open('../Events/S190814bv/S190814bv_THACHER_LALInference_4D_90th.txt','w') as csvfile:
+# with open('../Events/S190901ap/S190901ap_THACHER_bayestar_4D_90th.txt','w') as csvfile:
 
-	csvwriter = csv.writer(csvfile)
+# 	csvwriter = csv.writer(csvfile)
 
-	cols = []
-	cols.append('# FieldName')
-	cols.append('FieldRA')
-	cols.append('FieldDec')
-	cols.append('Telscope')
-	cols.append('Filter')
-	cols.append('ExpTime')
-	cols.append('Priority')
-	cols.append('Status')
-	csvwriter.writerow(cols)
+# 	cols = []
+# 	cols.append('# FieldName')
+# 	cols.append('FieldRA')
+# 	cols.append('FieldDec')
+# 	cols.append('Telscope')
+# 	cols.append('Filter')
+# 	cols.append('ExpTime')
+# 	cols.append('Priority')
+# 	cols.append('Status')
+# 	csvwriter.writerow(cols)
 
-	for i, row in enumerate(THACHER_tile_result):
+# 	for i, row in enumerate(THACHER_tile_result):
 
-		c = coord.SkyCoord(row[2], row[3], unit=(u.deg, u.deg))
-		coord_str = GetSexigesimalString(c) 
+# 		c = coord.SkyCoord(row[2], row[3], unit=(u.deg, u.deg))
+# 		coord_str = GetSexigesimalString(c) 
 
-		cols = []
+# 		cols = []
 
-		cols.append(row[1])
-		cols.append(coord_str[0])
-		cols.append(coord_str[1])
-		cols.append("THACHER")
-		cols.append("r")
-		cols.append("180")
-		cols.append(row[4])
-		cols.append('False')
-		csvwriter.writerow(cols)
+# 		cols.append(row[1])
+# 		cols.append(coord_str[0])
+# 		cols.append(coord_str[1])
+# 		cols.append("THACHER")
+# 		cols.append("r")
+# 		cols.append("180")
+# 		cols.append(row[4])
+# 		cols.append('False')
+# 		csvwriter.writerow(cols)
 
-	print("Done w/ Thacher")
+# 	print("Done w/ Thacher")
 
 
 # galaxies_select = '''
@@ -572,7 +576,7 @@ with open('../Events/S190814bv/S190814bv_THACHER_LALInference_4D_90th.txt','w') 
 # 		JOIN GalaxyDistance2 gd2 on gd2.id = hp_gd2.GalaxyDistance2_id
 # 		JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp_gd2.HealpixPixel_id
 # 		JOIN HealpixPixel hp on hp.id = hpc.HealpixPixel_id
-# 		WHERE gd2._Dec BETWEEN -60.0 and 0.0 and gd2.RA BETWEEN 0.0 and 45.0
+# 		-- WHERE gd2._Dec BETWEEN -40.0 and 70.0 and gd2.RA BETWEEN 180.0 and 315
 # 		GROUP BY 
 # 			gd2.Name_GWGC,
 # 			gd2.Name_HyperLEDA,
@@ -588,12 +592,13 @@ with open('../Events/S190814bv/S190814bv_THACHER_LALInference_4D_90th.txt','w') 
 # 			hpc.NetPixelProb,
 # 			hp.Mean
 # 		ORDER BY hp_gd2_w.GalaxyProb DESC) t
-# 		WHERE t.cum_prob < 0.9;
+# 		WHERE t.cum_prob < 0.9
+# 		LIMIT 0, 10000
 
 # '''
 
 # galaxy_result = query_db([galaxies_select])[0]
-# with open('../Events/S190814bv/S190814bv_GALAXIES_LALInference_95.txt','w') as csvfile:
+# with open('../Events/S190901ap/S190901ap_GALAXIES_bayestar_90.txt','w') as csvfile:
 
 # 	csvwriter = csv.writer(csvfile)
 
@@ -644,7 +649,7 @@ with open('../Events/S190814bv/S190814bv_THACHER_LALInference_4D_90th.txt','w') 
 
 
 
-# with open('../Events/S190814bv/S190814bv_GALAXIES_LALInference_95.reg','w') as csvfile:
+# with open('../Events/S190901ap/S190901ap_GALAXIES_bayestar_90.reg','w') as csvfile:
 
 # 	csvfile.write("# Region file format: DS9 version 4.0 global\n\n")
 # 	csvfile.write("global color=lightgreen\n")

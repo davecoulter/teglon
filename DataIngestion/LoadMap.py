@@ -92,11 +92,11 @@ db_host = db_config.get('database', 'DATABASE_HOST')
 db_port = db_config.get('database', 'DATABASE_PORT')
 
 isDEBUG = False
-build_map = False
-build_pixels = False
-build_tile_pixel_relation = False
-build_galaxy_pixel_relation = False
-build_completeness_func = False
+build_map = True
+build_pixels = True
+build_tile_pixel_relation = True
+build_galaxy_pixel_relation = True
+build_completeness_func = True
 build_galaxy_weights = True
 
 
@@ -413,7 +413,7 @@ class Teglon:
 			except FileExistsError:
 				print("\n\nDirectory " , formatted_healpix_dir ,  " already exists")
 
-			# Get file
+			# Get file -- ADD check and only get if you need to...
 			try:
 				print("Downloading `%s`..." % self.options.healpix_file)
 				t1 = time.time()
@@ -497,6 +497,7 @@ class Teglon:
 			prob, distmu, distsigma, distnorm, header_gen = hp.read_map(hpx_path, field=(0,1,2,3), h=True)
 
 
+			# TODO: correct the map re-scaling code. Check for NSIDE > 1024 and rescale to 512?
 			# print("Original length:")
 			# print(len(prob))
 
@@ -533,6 +534,7 @@ class Teglon:
 			healpix_map_id = query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0]
 			print("...Done")
 
+
 		if not build_pixels:
 			print("Skipping pixels...")
 			print("\tLoading NSIDE 128 pixels...")
@@ -568,8 +570,6 @@ class Teglon:
 			print("\n********* start DEBUG ***********")
 			print("Pixel select execution time: %s" % (t2 - t1))
 			print("********* end DEBUG ***********\n")
-
-			
 		else:
 			print("Building pixels...")
 			# Process healpix pixels and bulk insert into db. To do this, `LOAD DATA LOCAL INFILE` must be enabled in MySQL.
@@ -709,6 +709,7 @@ class Teglon:
 
 			with open('N128_dict.pkl', 'wb') as handle:
 				pickle.dump(N128_dict, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
 
 		if not build_tile_pixel_relation:
 			print("Skipping tile-pixel relation...")
@@ -1124,7 +1125,7 @@ class Teglon:
 						completeness_values_dict[N128_id][1])
 
 					renorm2dprob = pix_prob*(1.0-pix_completeness)
-					pixel_completeness_records.append((pix_id, pix_completeness, renorm2dprob, -1.0))
+					pixel_completeness_records.append((pix_id, pix_completeness, renorm2dprob, -1.0, healpix_map_id))
 
 
 				# Append to data to CSV
@@ -1213,7 +1214,7 @@ class Teglon:
 					completeness_values_dict[N128_id][1])
 
 				renorm2dprob = pix_prob*(1.0-pix_completeness)
-				pixel_completeness_records.append((pix_id, pix_completeness, renorm2dprob, -1.0))
+				pixel_completeness_records.append((pix_id, pix_completeness, renorm2dprob, -1.0, healpix_map_id))
 
 			t2 = time.time()
 			print("\n********* start DEBUG ***********")
@@ -1246,7 +1247,7 @@ class Teglon:
 					INTO TABLE HealpixPixel_Completeness 
 					FIELDS TERMINATED BY ',' 
 					LINES TERMINATED BY '\n' 
-					(HealpixPixel_id, PixelCompleteness, Renorm2DProb, NetPixelProb);"""
+					(HealpixPixel_id, PixelCompleteness, Renorm2DProb, NetPixelProb, HealpixMap_id);"""
 			
 			success = bulk_upload(upload_sql % pixel_completeness_upload_csv)
 			if not success:
@@ -1311,9 +1312,10 @@ class Teglon:
 			lum_norm_select = '''
 				SELECT SUM(POW(gd2.z_dist, 2)*POW(10.0, -0.4*gd2.B)) FROM GalaxyDistance2 gd2 
 				WHERE gd2.id IN (SELECT DISTINCT _gd2.id FROM GalaxyDistance2 _gd2 
-								 JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = _gd2.id)
+								 JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = _gd2.id
+								 JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id WHERE hp.HealpixMap_id = %s)
 			'''
-			lum_norm = query_db([lum_norm_select])[0][0][0]
+			lum_norm = query_db([lum_norm_select % healpix_map_id])[0][0][0]
 
 			# Compute luminosity weight and pre-compute what we can on z_prob...
 			precompute_select = '''
@@ -1332,10 +1334,11 @@ class Teglon:
 				JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
 				JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
 				WHERE hp.HealpixMap_id = %s and gd2.id IN (SELECT DISTINCT _gd2.id FROM GalaxyDistance2 _gd2 
-								JOIN HealpixPixel_GalaxyDistance2 hp__gd2 on hp__gd2.GalaxyDistance2_id = _gd2.id) 
+								JOIN HealpixPixel_GalaxyDistance2 hp__gd2 on hp__gd2.GalaxyDistance2_id = _gd2.id
+								JOIN HealpixPixel _hp on _hp.id = hp__gd2.HealpixPixel_id WHERE _hp.HealpixMap_id = %s) 
 			'''
 
-			precompute_result = query_db([precompute_select % (lum_norm, healpix_map_id)])[0]
+			precompute_result = query_db([precompute_select % (lum_norm, healpix_map_id, healpix_map_id)])[0]
 			t2 = time.time()
 			print("\n********* start DEBUG ***********")
 			print("Precompute Select execution time: %s" % (t2 - t1))
