@@ -6,3 +6,5 @@ Observed_Tiles/*
 Settings.ini
 *.pkl
 *.png
+docker_mysql/*
+

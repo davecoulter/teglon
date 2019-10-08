@@ -31,6 +31,7 @@ class Tile(Telgon_Shape):
 		self.mjd = None
 		self.mag_lim = None
 		self.exp_time = None
+		self.band_id = None
 
 		# Gets set after construction
 		self.field_name = None

@@ -1,0 +1,30 @@
+version: '2'
+services:
+    script:
+        container_name: gw_scipt
+        build: .
+        volumes:
+            - /Users/davecoulter/Dropbox/UCSC/GWSearch/teglon:/app
+            - /Users/davecoulter/Documents/cdbs:/cdbs
+        links:
+            - db
+        environment:
+          PYSYN_CDBS: /cdbs/
+          CONDA_DEFAULT_ENV: base
+          _: /opt/conda/bin/python
+          CONDA_EXE: /opt/conda/bin/conda
+          SHLVL: 1
+          CONDA_PYTHON_EXE: /opt/conda/bin/python
+          CONDA_SHLVL: 1
+          CONDA_PROMPT_MODIFIER: (base)
+          PROJ_LIB: /opt/conda/share/proj
+          CONDA_PREFIX: /opt/conda
+    db:
+        container_name: gw_db
+        image: "mysql:8.0.16"
+        ports:
+            - "53306:3306"
+        volumes:
+            - /Users/davecoulter/Dropbox/UCSC/GWSearch/teglon/docker_mysql/8.0:/var/lib/mysql
+        environment:
+            MYSQL_ROOT_PASSWORD: 4UCSCTr4nsients!

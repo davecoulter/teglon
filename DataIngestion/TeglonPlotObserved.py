@@ -410,10 +410,12 @@ class Teglon:
 					name = row[0]
 					ra = float(row[1])
 					dec = float(row[2])
-					flag = bool(int(row[3]))
+					flag1 = bool(int(row[3]))
+					flag2 = bool(int(row[4]))
+					is_keck = bool(int(row[5]))
 
 					# append tuple
-					candidates.append((name, coord.SkyCoord(ra,dec,unit=(u.deg,u.deg)), flag))
+					candidates.append((name, coord.SkyCoord(ra,dec,unit=(u.deg,u.deg)), flag1, flag2, is_keck))
 
 
 		select_pix = '''
@@ -512,47 +514,57 @@ class Teglon:
 		print("... %s" % index_90th)
 
 
-		print("Build multipolygons...")
-		net_50_polygon = []
-		for p in map_pix_sorted[0:index_50th]:
-			net_50_polygon += p.query_polygon
-		joined_50_poly = unary_union(net_50_polygon)
+		# print("Build multipolygons...")
+		# net_50_polygon = []
+		# for p in map_pix_sorted[0:index_50th]:
+		# 	net_50_polygon += p.query_polygon
+		# joined_50_poly = unary_union(net_50_polygon)
 		
-		# Fix any seams
-		eps = 0.00001
-		merged_50_poly = []
-		smoothed_50_poly = joined_50_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+		# # Fix any seams
+		# eps = 0.00001
+		# merged_50_poly = []
+		# smoothed_50_poly = joined_50_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
 		
-		try:
-			test_iter = iter(smoothed_50_poly)
-			merged_50_poly = smoothed_50_poly
-		except TypeError as te:
-			merged_50_poly.append(smoothed_50_poly)
+		# try:
+		# 	test_iter = iter(smoothed_50_poly)
+		# 	merged_50_poly = smoothed_50_poly
+		# except TypeError as te:
+		# 	merged_50_poly.append(smoothed_50_poly)
 
-		print("Number of sub-polygons in `merged_50_poly`: %s" % len(merged_50_poly))
-		sql_50_poly = SQL_Polygon(merged_50_poly, detectors[0])
+		# print("Number of sub-polygons in `merged_50_poly`: %s" % len(merged_50_poly))
+		# sql_50_poly = SQL_Polygon(merged_50_poly, detectors[0])
 
 
 
-		net_90_polygon = []
-		for p in map_pix_sorted[0:index_90th]:
-			net_90_polygon += p.query_polygon
-		joined_90_poly = unary_union(net_90_polygon)
+		# net_90_polygon = []
+		# for p in map_pix_sorted[0:index_90th]:
+		# 	net_90_polygon += p.query_polygon
+		# joined_90_poly = unary_union(net_90_polygon)
 		
-		# Fix any seams
-		merged_90_poly = []
-		smoothed_90_poly = joined_90_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+		# # Fix any seams
+		# merged_90_poly = []
+		# smoothed_90_poly = joined_90_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
 		
-		try:
-			test_iter = iter(smoothed_90_poly)
-			merged_90_poly = smoothed_90_poly
-		except TypeError as te:
-			merged_90_poly.append(smoothed_90_poly)
+		# try:
+		# 	test_iter = iter(smoothed_90_poly)
+		# 	merged_90_poly = smoothed_90_poly
+		# except TypeError as te:
+		# 	merged_90_poly.append(smoothed_90_poly)
 
-		print("Number of sub-polygons in `merged_90_poly`: %s" % len(merged_90_poly))
-		sql_90_poly = SQL_Polygon(merged_90_poly, detectors[0])
-		print("... done.")
+		# print("Number of sub-polygons in `merged_90_poly`: %s" % len(merged_90_poly))
+		# sql_90_poly = SQL_Polygon(merged_90_poly, detectors[0])
+		# print("... done.")
 
+
+
+		sql_50_poly = None
+		with open('sql50.pkl', 'rb') as handle:
+			sql_50_poly = pickle.load(handle)
+
+		sql_90_poly = None
+		with open('sql90.pkl', 'rb') as handle:
+			sql_90_poly = pickle.load(handle)
+		
 
 
 
@@ -563,18 +575,20 @@ class Teglon:
 				 lon_0=15.0,
 				 lat_0=-20.0,
 				 llcrnrlat=-35.0,
-				 urcrnrlat=-18.0,
-				 llcrnrlon=5.0,
-				 urcrnrlon=30.0)
-		# m = Basemap(projection='moll',lon_0=180.0)
+				 urcrnrlat=-19.5,
+				 llcrnrlon=8.0,
+				 urcrnrlon=24.5)
+		# # m = Basemap(projection='moll',lon_0=180.0)
 
-		print("Plotting `pixels_filled`...")
+		# print("Plotting `pixels_filled`...")
 
 		# Scale colormap
 		pix_90 = map_pix_sorted[0:index_90th]
 		pixel_probs = [p.prob for p in pix_90]
 		min_prob = np.min(pixel_probs)
-		max_prob = np.max(pixel_probs)  
+		max_prob = np.max(pixel_probs)
+		# min_prob = 1.341511144989834e-06
+		# max_prob = 6.890843958619067e-05  
 
 		print("min prob: %s" % min_prob)
 		print("max prob: %s" % max_prob)
@@ -590,112 +604,233 @@ class Teglon:
 		
 
 
-		print("Plotting (%s) `pixels`..." % len(pix_90))
-		for i,p in enumerate(pix_90):
-			p.plot(m, ax, facecolor=plt.cm.Greys(norm(p.prob)), edgecolor='None', linewidth=0.5, alpha=0.8)
+		
 
-		print("Plotting SQL Multipolygons")
-		sql_50_poly.plot(m, ax, edgecolor='r', linewidth=1.5, facecolor='None')
-		sql_90_poly.plot(m, ax, edgecolor='r', linewidth=1.5, facecolor='None')
+		
 			
 
+		# clrs = {
+		# 	"SWOPE":"yellow",
+		# 	"NICKEL":"brown",
+		# 	"THACHER":"blue",
+		# 	"ANDICAM":"red",
+		# 	"MOSFIRE":"green",
+		# }
+
 		clrs = {
-			"SWOPE":"yellow",
-			"NICKEL":"brown",
-			"THACHER":"blue",
-			"ANDICAM":"red",
-			"MOSFIRE":"green",
+			"SWOPE":(230.0/256.0, 159/256.0, 0),
+			"NICKEL":(0, 114.0/256.0, 178.0/256.0),
+			"THACHER":(0, 158.0/256.0, 115.0/256.0),
+			"MOSFIRE":(204.0/256.0, 121.0/256.0, 167.0/256.0),
+			# "ANDICAM":"red",
+			# "MOSFIRE":"green"
 		}
 
 
-		# Plot SWOPE, then THACHER, then NICKEL
+		
+
+
+		# Plot SWOPE, then THACHER, then NICKEL, then MOSFIRE
+		x1,y1 = m(0,0)
+		m.plot(x1, y1, marker='s', markeredgecolor="k", markerfacecolor=clrs["SWOPE"], markersize=20, label="Swope", linestyle='None')
+		m.plot(x1, y1, marker='s', markeredgecolor="k", markerfacecolor=clrs["THACHER"], markersize=16, label="Thacher", linestyle='None')
+		m.plot(x1, y1, marker='s', markeredgecolor="k", markerfacecolor=clrs["NICKEL"], markersize=14, label="Nickel", linestyle='None')
+		m.plot(x1, y1, marker='s', markeredgecolor="k", markerfacecolor=clrs["MOSFIRE"], markersize=10, label="MOSFIRE", linestyle='None')
+
+		tile_opacity = 0.1
 		print("Plotting Tiles for: %s (%s)" % ("SWOPE", clrs["SWOPE"]))
 		for i, t in enumerate(observed_tiles["SWOPE"]):
-			if i == 0:
-				t.plot(m, ax, edgecolor=clrs["SWOPE"], facecolor=clrs["SWOPE"], linewidth=0.25, alpha=0.35, label="SWOPE".capitalize())
-			else:
-				t.plot(m, ax, edgecolor=clrs["SWOPE"], facecolor=clrs["SWOPE"], linewidth=0.25, alpha=0.35)
-			t.plot(m, ax, edgecolor=clrs["SWOPE"], facecolor="None", linewidth=0.25, alpha=1.0)
+			t.plot(m, ax, edgecolor=clrs["SWOPE"], facecolor=clrs["SWOPE"], linewidth=0.25, alpha=tile_opacity)
+			t.plot(m, ax, edgecolor='k', facecolor="None", linewidth=0.25, alpha=1.0)
 
 		print("Plotting Tiles for: %s (%s)" % ("THACHER", clrs["THACHER"]))
 		for i, t in enumerate(observed_tiles["THACHER"]):
-			if i == 0:
-				t.plot(m, ax, edgecolor=clrs["THACHER"], facecolor=clrs["THACHER"], linewidth=0.25, alpha=0.35, label="THACHER".capitalize())
-			else:
-				t.plot(m, ax, edgecolor=clrs["THACHER"], facecolor=clrs["THACHER"], linewidth=0.25, alpha=0.35)
-			t.plot(m, ax, edgecolor=clrs["THACHER"], facecolor="None", linewidth=0.25, alpha=1.0)
+			t.plot(m, ax, edgecolor=clrs["THACHER"], facecolor=clrs["THACHER"], linewidth=0.25, alpha=tile_opacity)
+			t.plot(m, ax, edgecolor='k', facecolor="None", linewidth=0.25, alpha=1.0)
 
 		print("Plotting Tiles for: %s (%s)" % ("NICKEL", clrs["NICKEL"]))
 		for i, t in enumerate(observed_tiles["NICKEL"]):
-			if i == 0:
-				t.plot(m, ax, edgecolor=clrs["NICKEL"], facecolor=clrs["NICKEL"], linewidth=0.25, alpha=0.35, label="NICKEL".capitalize())
-			else:
-				t.plot(m, ax, edgecolor=clrs["NICKEL"], facecolor=clrs["NICKEL"], linewidth=0.25, alpha=0.35)
-			t.plot(m, ax, edgecolor=clrs["NICKEL"], facecolor="None", linewidth=0.25, alpha=1.0)
+			t.plot(m, ax, edgecolor=clrs["NICKEL"], facecolor=clrs["NICKEL"], linewidth=0.25, alpha=tile_opacity)
+			t.plot(m, ax, edgecolor='k', facecolor="None", linewidth=0.25, alpha=1.0)
 
-		# for detector_name, tile_list in observed_tiles.items():
-		# 	print("Plotting Tiles for: %s (%s)" % (detector_name, clrs[detector_name]))
+		print("Plotting Tiles for: %s (%s)" % ("MOSFIRE", clrs["MOSFIRE"]))
+		for i, t in enumerate(observed_tiles["MOSFIRE"]):
+			t.plot(m, ax, edgecolor=clrs["MOSFIRE"], facecolor=clrs["MOSFIRE"], linewidth=0.25, alpha=1.0, zorder=9999)
+			t.plot(m, ax, edgecolor='k', facecolor="None", linewidth=0.25, alpha=1.0, zorder=9999)
 
-		# 	for i, t in enumerate(tile_list):
-		# 		if i == 0:
-		# 			t.plot(m, ax, edgecolor=clrs[detector_name], facecolor=clrs[detector_name], linewidth=0.25, alpha=0.35, label=detector_name.capitalize())
-		# 		else:
-		# 			t.plot(m, ax, edgecolor=clrs[detector_name], facecolor=clrs[detector_name], linewidth=0.25, alpha=0.35)
 
-		for c in candidates:
-			x,y = m(c[1].ra.degree, c[1].dec.degree)
+		print("Plotting (%s) `pixels`..." % len(pix_90))
+		for i,p in enumerate(pix_90):
+			p.plot(m, ax, facecolor=plt.cm.Greys(norm(p.prob)), edgecolor='None', linewidth=0.5, alpha=norm(p.prob)*0.8)
 
-			mkrclr = 'red' if c[2] else 'gray'
-			m.plot(x, y, marker='o', markeredgecolor=mkrclr, markerfacecolor=mkrclr, markersize=2.0)
+		print("Plotting SQL Multipolygons")
+
+
+		# with open('sql50.pkl', 'wb') as handle:
+		# 	pickle.dump(sql_50_poly, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+		# with open('sql90.pkl', 'wb') as handle:
+		# 	pickle.dump(sql_90_poly, handle, protocol=pickle.HIGHEST_PROTOCOL)
+		sql_50_poly.plot(m, ax, edgecolor='black', linewidth=1.0, facecolor='None')
+		sql_90_poly.plot(m, ax, edgecolor='gray', linewidth=0.75, facecolor='None')
+
+
+
 
 		
 
 		# Plotted off the map so that the legend will have a line item
-		x1,y1 = m(0,0)
-		m.plot(x1, y1, marker='.', linestyle="None", markeredgecolor="red", markerfacecolor="red", markersize=10, label="Good candidate")
+		if has_candidates:
+			for c in candidates:
+				x,y = m(c[1].ra.degree, c[1].dec.degree)
 
-		x2,y2 = m(0,0)
-		m.plot(x2, y2, marker='.', linestyle="None", markeredgecolor="grey", markerfacecolor="grey", markersize=10, label="Ruled out candidate")
+				if c[4]:
+					m.plot(x, y, marker='*', markeredgecolor='k', markerfacecolor='gray', markersize=20.0, zorder=9999)
+				else:
+					mkrclr = 'gray'
+					if c[2] and c[3]: # passes both Charlie and Ryan cuts
+						mkrclr = 'red'
+					m.plot(x, y, marker='o', markeredgecolor='k', markerfacecolor=mkrclr, markersize=5.0)
 
 
-		# meridians = np.arange(0.,360.,60.)
-		# m.drawparallels(np.arange(-90.,91.,30.),fontsize=14,labels=[True,True,False,False],dashes=[2,2],linewidth=0.5) # , xoffset=2500000
-		# m.drawmeridians(meridians,labels=[False,False,False,False],dashes=[2,2],linewidth=0.5)
-		# draw meridians
-		meridians = np.arange(0.,360.,10.)
-		par = m.drawmeridians(meridians,labels=[0,0,0,1],fontsize=18,zorder=-1,color='gray', linewidth=0.5)
+				
 
-		# draw parallels
-		parallels = np.arange(-90.,90.,10.)
-		par = m.drawparallels(parallels,labels=[0,1,0,0],fontsize=18,zorder=-1,color='gray', linewidth=0.5, xoffset=230000)
+			x1,y1 = m(0,0)
+			m.plot(x1, y1, marker='.', linestyle="None", markeredgecolor="k", markerfacecolor="red", markersize=20, label="Viable candidate")
+
+			x2,y2 = m(0,0)
+			m.plot(x2, y2, marker='.', linestyle="None", markeredgecolor="k", markerfacecolor="grey", markersize=20, label="Excluded")
+
+			x3,y3 = m(0,0)
+			m.plot(x3, y3, marker='*', linestyle="None", markeredgecolor="k", markerfacecolor="grey", markersize=20, label="Keck Observed")
+
+
+		# # # -------------- Use this for mollweide projections -------------- 
+		# # meridians = np.arange(0.,360.,60.)
+		# # m.drawparallels(np.arange(-90.,91.,30.),fontsize=14,labels=[True,True,False,False],dashes=[2,2],linewidth=0.5) # , xoffset=2500000
+		# # m.drawmeridians(meridians,labels=[False,False,False,False],dashes=[2,2],linewidth=0.5)
+		# # # ---------------------------------------------------------------- 
 		
-		# for mer in meridians[1:]:
-		# 	plt.annotate("%0.0f" % mer,xy=m(mer,0),xycoords='data', fontsize=14, zorder=9999)
+
+
+		# # # -------------- Use this for stereographic projections ----------
+		# # # draw meridians
+		# # meridians = np.arange(0.,360.,10.)
+		# # par = m.drawmeridians(meridians,labels=[0,0,0,1],fontsize=18,zorder=-1,color='gray', linewidth=0.5)
+
+		# # # draw parallels
+		# # parallels = np.arange(-90.,90.,10.)
+		# # par = m.drawparallels(parallels,labels=[0,1,0,0],fontsize=18,zorder=-1,color='gray', linewidth=0.5, xoffset=230000)
+		# # ## ----------------------------------------------------------------
+
+		# # for mer in meridians[1:]:
+		# # 	plt.annotate("%0.0f" % mer,xy=m(mer,0),xycoords='data', fontsize=14, zorder=9999)
+
+
+
+		
+
+
+		# draw parallels.
+		sm_label_size = 18
+		label_size = 28
+		title_size = 36
+
+		_90_x1 = 0.77
+		_90_y1 = 0.558
+
+		_90_x2 = 0.77
+		_90_y2 = 0.40
+
+		_90_text_y = 0.37
+		_90_text_x = 0.32
+
+
+
+		_50_x1 = 0.60
+		_50_y1 = 0.51
+
+		_50_x2 = 0.48
+		_50_y2 = 0.40
+
+		_50_text_y = 0.37
+		_50_text_x = 0.64
+
+		
+
+		ax.annotate('', xy=(_90_x1,_90_y1), xytext=(_90_x2,_90_y2), xycoords='axes fraction', arrowprops={'arrowstyle': '-', 'lw':2.0 })
+		ax.annotate('', xy=(_50_x1,_50_y1), xytext=(_50_x2,_50_y2), xycoords='axes fraction', arrowprops={'arrowstyle': '-', 'lw':2.0 })
+
+		ax.annotate('90th percentile', xy=(_50_text_x,_50_text_y), xycoords='axes fraction', fontsize=sm_label_size)
+		ax.annotate('50th percentile', xy=(_90_text_x,_90_text_y), xycoords='axes fraction', fontsize=sm_label_size)
+
+		parallels = np.arange(-90.,90.,10.)
+		dec_ticks = m.drawparallels(parallels,labels=[0,1,0,0])
+		for i,tick_obj in enumerate(dec_ticks):
+			a = coord.Angle(tick_obj, unit=u.deg)
+			
+			for text_obj in dec_ticks[tick_obj][1]:        
+				direction = '+' if a.dms[0] > 0.0 else '-'
+				text_obj.set_text(r'${0}{1:0g}^{{\degree}}$'.format(direction,np.abs(a.dms[0])))
+				text_obj.set_size(sm_label_size)
+				x = text_obj.get_position()[0]
+				
+				new_x = x*(1.0+0.08)
+				text_obj.set_x(new_x)
+
+
+		# draw meridians
+		meridians = np.arange(0.,360.,7.5)
+		ra_ticks = m.drawmeridians(meridians,labels=[0,0,0,1])
+
+		RA_label_dict = {
+			7.5:r'$00^{\mathrm{h}}30^{\mathrm{m}}$',
+			15.0:r'$01^{\mathrm{h}}00^{\mathrm{m}}$',
+			22.5:r'$01^{\mathrm{h}}30^{\mathrm{m}}$',
+			
+		}
+
+		for i,tick_obj in enumerate(ra_ticks):
+			# a = coord.Angle(tick_obj, unit=u.deg)
+			# print(a.hms)
+			print(tick_obj)
+			for text_obj in ra_ticks[tick_obj][1]:
+				if tick_obj in RA_label_dict:
+					text_obj.set_text(RA_label_dict[tick_obj])
+					text_obj.set_size(sm_label_size)
+			
 
 		sm = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.Greys)
 		sm.set_array([]) # can be an empty list
 
-		tks = np.linspace(min_prob, max_prob, 11)
+		tks = np.linspace(min_prob, max_prob, 6)
 		# tks = np.logspace(np.log10(min_prob), np.log10(max_prob), 11)
 		tks_strings = []
 		
 		for t in tks:
-			tks_strings.append('%0.3f' % (t*100))
+			tks_strings.append('%0.2f' % (t*100))
 
 
-		cb = fig.colorbar(sm, ax=ax, ticks=tks, orientation='horizontal', fraction=0.08951, pad=0.05, alpha=0.80) 
-		cb.ax.set_xticklabels(tks_strings, fontsize=14)
-		cb.set_label("% per Pixel", fontsize=14, labelpad=10.0)
-		cb.outline.set_linewidth(1.0)
+		cb = fig.colorbar(sm, ax=ax, ticks=tks, orientation='vertical', fraction=0.04875, pad=0.02, alpha=0.80) # 0.08951
+		cb.ax.set_yticklabels(tks_strings, fontsize=16)
+		cb.set_label("2D Pixel Probability", fontsize=label_size, labelpad=9.0)
+
+		cb.ax.tick_params(width=2.0, length=6.0)
+
+		cb.outline.set_linewidth(2.0)
 
 		for axis in ['top','bottom','left','right']:
 			ax.spines[axis].set_linewidth(2.0)
 
-		ax.legend(loc='upper left')
-
+		
 		ax.invert_xaxis()
+		ax.legend(loc='upper left', fontsize=sm_label_size, borderpad=0.35, handletextpad=0.0, labelspacing=0.4)
+		# ax.legend(fontsize=14)
 
-		fig.savefig('CharlieTest.png', bbox_inches='tight') #,dpi=840
+		plt.ylabel(r'$\mathrm{Declination}$',fontsize=label_size,labelpad=36)
+		plt.xlabel(r'$\mathrm{Right\;Ascension}$',fontsize=label_size,labelpad=30)
+
+		fig.savefig('Keck.png', bbox_inches='tight') #,dpi=840
 		plt.close('all')
 		print("... Done.")
 		

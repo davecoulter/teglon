@@ -1,6 +1,8 @@
 import matplotlib
 matplotlib.use("Agg")
 
+import os
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
@@ -13,7 +15,7 @@ from mpl_toolkits.axes_grid1 import make_axes_locatable
 import sys
 sys.path.append('../')
 
-import os
+
 import optparse
 
 from configparser import RawConfigParser
@@ -94,7 +96,7 @@ db_name = db_config.get('database', 'DATABASE_NAME')
 db_user = db_config.get('database', 'DATABASE_USER')
 db_pwd = db_config.get('database', 'DATABASE_PASSWORD')
 db_host = db_config.get('database', 'DATABASE_HOST')
-db_port = db_config.get('database', 'DATABASE_PORT')
+db_port = int(db_config.get('database', 'DATABASE_PORT'))
 
 isDEBUG = False
 
@@ -126,7 +128,7 @@ def query_db(query_list, commit=False):
 	try:
 		chunk_size = 1e+6
 
-		db = my.connect(host=db_host, user=db_user, passwd=db_pwd, db=db_name, port=3306)
+		db = my.connect(host=db_host, user=db_user, passwd=db_pwd, db=db_name, port=db_port)
 		cursor = db.cursor()
 
 		for q in query_list:
@@ -348,8 +350,6 @@ class Teglon:
 
 		parser.add_option('--model_dir', default="../Events/{GWID}/Models", type="str", help='Directory for where to look for the models to be processed.')
 
-		# parser.add_option('--model_file', default="", type="str", help='File that contains model to process.')
-
 		return(parser)
 
 	def main(self):
@@ -364,10 +364,6 @@ class Teglon:
 		if self.options.healpix_file == "":
 			is_error = True
 			print("Healpix file is required.")
-
-		# if self.options.model_file == "":
-		# 	is_error = True
-		# 	print("Model file is required.")
 
 		if is_error:
 			print("Exiting...")
@@ -384,7 +380,6 @@ class Teglon:
 			formatted_model_dir = formatted_model_dir.replace("{GWID}", self.options.gw_id)
 
 		hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
-		# model_path = "%s/%s" % (formatted_model_dir, self.options.model_file)
 
 		model_files = []
 		for file in os.listdir(formatted_model_dir):
@@ -401,10 +396,6 @@ class Teglon:
 			is_error = True
 			print("Healpix file `%s` does not exist." % hpx_path)
 
-		# if not os.path.exists(model_path):
-		# 	is_error = True
-		# 	print("Model file `%s` does not exist." % model_path)
-
 		if is_error:
 			print("Exiting...")
 			return 1
@@ -414,24 +405,18 @@ class Teglon:
 		# CONVENIENCE DICTIONARIES
 		# Band abbreviation, band_id mapping
 		band_mapping_new = {
+			"sdss_g":"SDSS g",
 			"sdss_r":"SDSS r",
+			"sdss_i":"SDSS i",
 			"Clear":"Clear"
 		}
 
-		# band_mapping_old = {
-		# 	"Clear":"Clear",
-		# 	"r":"SDSS r"
-		# }
-
 		reverse_band_mapping_new = {
+			"SDSS g":"sdss_g",
 			"SDSS r":"sdss_r",
-			"Clear":"Clear",
+			"SDSS i":"sdss_i",
+			"Clear":"Clear"
 		}
-
-		# reverse_band_mapping_old = {
-		# 	"Clear":"Clear",
-		# 	"SDSS r":"r"
-		# }
 
 		detector_mapping = {
 			"s":"SWOPE",
@@ -439,7 +424,8 @@ class Teglon:
 			"a":"ANDICAM",
 			"n":"NICKEL",
 			"m":"MOSFIRE",
-			"k":"KAIT"
+			"k":"KAIT",
+			"si":"SINISTRO"
 		}
 
 
@@ -464,7 +450,9 @@ class Teglon:
 			mask = model_table['time']>0.0
 
 			time = np.asarray(model_table['time'][mask])
+			g = np.asarray(model_table['sdss_g'][mask])
 			r = np.asarray(model_table['sdss_r'][mask])
+			i = np.asarray(model_table['sdss_i'][mask])
 			clear = np.asarray(model_table['Clear'][mask])
 
 			model_props = model_table.meta['comment']
@@ -475,15 +463,15 @@ class Teglon:
 			exp = float(re.findall("[e+\-](-+\d+\.?\d+)", model_props[3])[0])
 			Xlan = factor*10**(exp)
 
-			
 			base_name = os.path.basename(mf)
 			print("Loading `%s`" % base_name)
 			models[(base_name, mass, velocity, Xlan)] = {
 				'time':time,
+				'sdss_g':g,
 				'sdss_r':r,
+				'sdss_i':i,
 				'Clear':clear
 			}
-
 
 		# Get Map ID
 		print("\nLoading Healpix Map...")
@@ -618,43 +606,8 @@ class Teglon:
 			p_new.distance_probs = distance_probs
 			
 			map_pixel_dict_new[pixel_index] = p_new
-			# p_old = copy.deepcopy(p_new)
-			# map_pixel_dict_old[pixel_index] = p_old
 
 		print("\nMap pixel dict complete. %s bad pixels." % count_bad_pixels)
-
-
-
-		# # Get OLD Model	
-		# model = OrderedDict()
-		# dict_keys = []
-		
-		# print("\nLoading 0817 model...")
-		# with open(model_path,'r') as csvfile:
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	for i, row in enumerate(csvreader):
-		# 		if i == 0: # header
-		# 			for col in row:
-		# 				if col != '':
-		# 					key = col.strip()
-		# 					dict_keys.append(key)
-		# 					model[key] = []
-		# 		else:
-		# 			for j, col_val in enumerate(row):
-		# 				if col_val != '':
-
-		# 					# Convert to an abs mag where appropriate...
-		# 					val = float(col_val)
-
-		# 					if j > 1: # first two columns are time and luminosity... only convert app mags
-		# 						val = val - 5.0*np.log10(40.0e+6)+5
-
-		# 					model[dict_keys[j]].append(val)
-
-		# # convert model lists to numpy arrays
-		# for k in dict_keys:
-		# 	model[k] = np.asarray(model[k])
-
 
 
 		# Get Detectors
@@ -674,9 +627,6 @@ class Teglon:
 		print("\nLoading KAIT...")
 		dr = query_db([detector_select % 'KAIT'])[0][0]
 		kait = Detector(dr[1], float(dr[2]), float(dr[2]), detector_id=int(dr[0]))
-
-
-
 		
 
 		# Get and instantiate all observed tiles
@@ -767,59 +717,15 @@ class Teglon:
 					continue 
 
 				pix_synopsis_new = map_pixel_dict_new[i]
-				# pix_synopsis_old = map_pixel_dict_old[i]
 
 				if band_name not in pix_synopsis_new.measured_bands:
 					pix_synopsis_new.measured_bands.append(band_name)
 					pix_synopsis_new.delta_mjds[band_name] = {}
 					pix_synopsis_new.lim_mags[band_name] = {}
 
-				# if band_name not in pix_synopsis_old.measured_bands:
-				# 	pix_synopsis_old.measured_bands.append(band_name)
-				# 	pix_synopsis_old.delta_mjds[band_name] = {}
-				# 	pix_synopsis_old.lim_mags[band_name] = {}
-
 				pix_synopsis_new.delta_mjds[band_name][t.mjd] = (t.mjd - GW190814_t_0)
 				pix_synopsis_new.lim_mags[band_name][t.mjd] = (t.mag_lim)
 
-				# pix_synopsis_old.delta_mjds[band_name][t.mjd] = (t.mjd - GW190814_t_0)
-				# pix_synopsis_old.lim_mags[band_name][t.mjd] = (t.mag_lim)
-
-
-
-
-
-
-		# # OLD
-		# print("\nUpdating pixel `A_lambda` and `model_observer_time_arr`...")
-		# # Set pixel `model_observer_time_arr` and `A_lambda`
-		# for pix_index, pix_synopsis in map_pixel_dict_old.items():
-			
-		# 	# iterate over the model columns first...
-		# 	for model_col_index, model_band in enumerate(dict_keys):
-				
-		# 		# disregard time (model_col_index == 0) and luminosity (model_col_index == 1)... 
-		# 		# 	only need each Abs Mag for now
-		# 		if model_col_index > 1:
-
-		# 			# Only cache model LCs where we have a configured filter
-		# 			if model_band in band_mapping_old:
-
-		# 				band = band_dict_by_name[band_mapping_old[model_band]]
-						
-		# 				band_id = band[0]
-		# 				band_name = band[1]
-		# 				band_coeff = band[2]
-
-		# 				# Only compute things in the model that have been measured by observations
-		# 				if band_name in pix_synopsis.measured_bands:
-		# 					if band_name not in pix_synopsis.A_lambda:
-
-		# 						pix_a_lambda = pix_synopsis.pix_ebv*band_coeff
-		# 						pix_synopsis.A_lambda[band_name] = pix_a_lambda
-			
-		# 	time_dilation = 1.0 + pix_synopsis.z
-		# 	pix_synopsis.model_observer_time_arr_old = model["time"]*time_dilation
 
 		print("\nInitializing %s models..." % len(models))
 
@@ -894,129 +800,6 @@ class Teglon:
 			if count % 1000 == 0:
 				print("Processed: %s" % count)
 
-
-		# # OLD Do the Calculation
-		# print("\nIntegrating total model probs...")
-		# count_old = 0
-		# for pix_index, pix_synopsis in map_pixel_dict_old.items():
-
-		# 	for band in pix_synopsis.measured_bands:
-
-		# 		# print("Pix Index: %s" % pixel_index)
-		# 		# print("Band: %s" % band)
-
-		# 		# look up the corresponding Abs Mag based on delta t from the model
-		# 		model_abs_mags = model[reverse_band_mapping_old[band]]
-		# 		pixel_delta_mjd = pix_synopsis.delta_mjds[band]
-
-		# 		# print("Model abs mags: %s" % model_abs_mags)
-		# 		# print("pixel_delta_mjd: %s" % pixel_delta_mjd)
-				
-		# 		for i, (mjd, delta_mjd) in enumerate(pixel_delta_mjd.items()):
-
-		# 			# print("MJD: %s" % mjd)
-		# 			# print("delta_mjd: %s" % delta_mjd)
-		# 			# print("time arr: %s" % pix_synopsis.model_observer_time_arr_old)
-	
-		# 			# get the corresponding abs mag for the time of the observation
-		# 			pix_abs_mag = np.interp(delta_mjd, pix_synopsis.model_observer_time_arr_old, model_abs_mags)
-		# 			# print("pix_abs_mag: %s" % pix_abs_mag)
-					
-		# 			# compute the distribution in apparent mag
-		# 			pix_app_mag = np.asarray(pix_synopsis.distance_modulus_arr) + pix_abs_mag + pix_synopsis.A_lambda[band]
-		# 			# print("pix_app_mag: %s" % pix_app_mag)
-					
-		# 			# re-normalize this distribution to sum to the pixel 2D prob
-		# 			# SIMPS (y, x)
-		# 			app_mag_norm = simps(pix_synopsis.distance_probs, pix_app_mag)
-		# 			# print("app_mag_norm: %s" % app_mag_norm)
-
-		# 			renorm_pix_app_mag_prob = np.asarray((pix_synopsis.prob_2D/app_mag_norm)*pix_synopsis.distance_probs)
-		# 			# print("renorm_pix_app_mag_prob: %s" % renorm_pix_app_mag_prob)
-
-		# 			# Integrate the app mag distribution from arbitrarily bright to the limiting magnitude
-		# 			f_interp = lambda x: np.interp(x, pix_app_mag, renorm_pix_app_mag_prob)
-
-		# 			lower_bound = np.min(pix_app_mag)
-		# 			upper_bound = pix_synopsis.lim_mags[band][mjd]
-		# 			# print("lower_bound: %s" % lower_bound)
-		# 			# print("upper_bound: %s" % upper_bound)
-
-		# 			if band not in pix_synopsis.best_integrated_probs:
-		# 				pix_synopsis.best_integrated_probs[band] = {}
-
-		# 			pix_synopsis.best_integrated_probs[band][mjd] = 0.0
-		# 			prob_to_detect = quad(f_interp, lower_bound, upper_bound)[0] #, points=pix_app_mag
-		# 			# print("prob_to_detect: %s" % prob_to_detect)
-
-		# 			if not np.isnan(prob_to_detect) and prob_to_detect >= 0.0:
-		# 				pix_synopsis.best_integrated_probs[band][mjd] = prob_to_detect
-
-		# 			# print("prob_to_detect: %s" % prob_to_detect)
-		# 			# frac = float(clean_prob_to_detect)/float(pix_synopsis.prob_2D)
-		# 			# print("fractional prob: %s" % frac)
-
-		# 			# fig = plt.figure(figsize=(10,10), dpi=1000)
-		# 			# ax = fig.add_subplot(111)
-		# 			# ax.plot(pix_app_mag, renorm_pix_app_mag_prob)
-		# 			# ax.fill_between(pix_app_mag, 0, renorm_pix_app_mag_prob, where=pix_app_mag <= int_to_val)
-		# 			# ax.set_xlim([18.0, 25.0])
-		# 			# fig.savefig('AppMagTest.png', bbox_inches='tight') #,dpi=840
-		# 			# plt.close('all')
-
-		# 			# raise("Stop")
-		# 	count_old += 1
-
-		# 	if count_old % 1000 == 0:
-		# 		print("Processed Old: %s" % count_old)
-
-
-
-
-
-
-		# #Diagnostic
-		# print("\n\n\n---------------------DEBUG---------------------\n")
-		# print("NEW")
-		# for i, (pix_index, pix_synopsis) in enumerate(map_pixel_dict_new.items()):
-		# 	if i == 1345:
-		# 		print(pix_synopsis)
-
-		# print("OLD")
-		# for i, (pix_index, pix_synopsis) in enumerate(map_pixel_dict_old.items()):
-		# 	if i == 1345:
-		# 		print(pix_synopsis)
-
-		# print("\n---------------------DEBUG---------------------\n\n\n")
-
-
-
-		# # OLD
-		# # Finally, get the highest valued integration, and sum
-		# running_sums = {} # model:band:value
-		# # pixels_to_plot = []
-		# for pix_index, pix_synopsis in map_pixel_dict_old.items():
-		# 	# Hack, just for plotting
-		# 	for band in pix_synopsis.measured_bands:
-		# 		pix_max = 0.0
-
-		# 		if band not in running_sums:
-		# 			running_sums[band] = 0.0
-				
-		# 		probs = []
-		# 		for mjd, integrated_prob in pix_synopsis.best_integrated_probs[band].items():
-		# 			probs.append(pix_synopsis.best_integrated_probs[band][mjd])
-
-		# 		pix_max = np.max(probs)
-		# 		running_sums[band] += np.max(probs)
-
-		# 	# pixels_to_plot.append(Pixel_Element(pix_index, healpix_map_nside, pix_max))
-
-		# for band, running_sum in running_sums.items():
-		# 	print("\nOLD Integrated prob to detect 0817-like transient (%s): %s" % (band, running_sum))
-
-
-
 		# NEW
 		# Finally, get the highest valued integration, and sum
 		running_sums = {} # model:band:value
@@ -1027,17 +810,12 @@ class Teglon:
 				for model_param_tuple, model_dict in models.items():
 
 					pix_max = 0.0
-
 					if model_param_tuple not in running_sums:
-						# print("Model not in running_sums: (%s, %s, %s, %s)" % model_param_tuple)
 						running_sums[model_param_tuple] = {}
 
 					try:
 						t = running_sums[model_param_tuple][band]						
 					except:
-						# print("Band not in running_sums[(%s, %s, %s, %s)]" % model_param_tuple)
-						# print("\t%s" % band)
-						# print("\tKeys: %s" % running_sums[model_param_tuple].keys())
 						
 						running_sums[model_param_tuple][band] = 0.0
 
@@ -1051,10 +829,40 @@ class Teglon:
 			# pixels_to_plot[] append(Pixel_Element(pix_index, healpix_map_nside, pix_max))
 
 		for model_param_tuple, band_dict in running_sums.items():
-			print("\nNEW Integrated prob to detect model `%s` (%s, %s, %s)" % model_param_tuple)
+			print("\nIntegrated prob to detect model by band `%s` (%s, %s, %s)" % model_param_tuple)
 			
 			for band, running_sum in band_dict.items():	
 				print("\t%s: %s" % (band, running_sum))
+
+
+
+
+		## Additional calculation -- for every pixel, just get the highest prob
+		running_sums2 = {}
+		for model_param_tuple, model_dict in models.items():
+
+			running_sums2[model_param_tuple] = 0.0
+
+			for pix_index, pix_synopsis in map_pixel_dict_new.items():
+
+				pix_max = 0.0
+				probs = []
+				
+				for band in pix_synopsis.measured_bands:
+					for mjd, integrated_prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
+						probs.append(integrated_prob)
+				
+				pix_max = np.max(probs)
+				running_sums2[model_param_tuple] += pix_max
+
+		for model_param_tuple, prob in running_sums2.items():
+			print("\nCombined Integrated prob to detect model `%s` (%s, %s, %s)" % model_param_tuple)
+			print("\t%s" % prob)
+
+				
+
+
+
 
 
 
