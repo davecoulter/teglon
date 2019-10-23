@@ -344,9 +344,30 @@ class Teglon:
 
 		parser.add_option('--tile_file', default="", type="str", help='File that contains the tile observations.')
 
+		parser.add_option('--tele', default="", type="str", help='Telescope abbreviation that `tile_file` corresponds to.')
+
 		return(parser)
 
 	def main(self):
+
+		# Band abbreviation, band_id mapping
+		band_mapping = {
+			"g": "SDSS g",
+			"r": "SDSS r",
+			"i": "SDSS i",
+			"Clear": "Clear",
+			"J": "UKIRT J"
+		}
+
+		detector_mapping = {
+			"s": "SWOPE",
+			"t": "THACHER",
+			"a": "ANDICAM",
+			"n": "NICKEL",
+			"m": "MOSFIRE",
+			"k": "KAIT",
+			"si": "SINISTRO"
+		}
 
 		is_error = False
 
@@ -363,10 +384,13 @@ class Teglon:
 			is_error = True
 			print("Tile file is required.")
 
+		if self.options.tele == "":
+			is_error = True
+			print("Telescope abbreviation is required.")
+
 		if is_error:
 			print("Exiting...")
 			return 1
-
 
 		formatted_healpix_dir = self.options.healpix_dir
 		if "{GWID}" in formatted_healpix_dir:
@@ -377,7 +401,6 @@ class Teglon:
 			formatted_tile_dir = formatted_tile_dir.replace("{GWID}", self.options.gw_id)
 
 		hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
-
 		tile_path = "%s/%s" % (formatted_tile_dir, self.options.tile_file)
 
 		# Check if the above files exist...
@@ -389,7 +412,10 @@ class Teglon:
 			is_error = True
 			print("Tile file `%s` does not exist." % tile_path)
 
-		
+		if self.options.tele not in detector_mapping:
+			is_error = True
+			print("Unknown telescope abbreviation: %s " % self.options.tele)
+
 		# TODO: STANDARDIZE FILE FORMATTING	
 		# God damn you Charlie, you beautiful son of a bitch.
 
@@ -405,25 +431,6 @@ class Teglon:
 		if is_error:
 			print("Exiting...")
 			return 1
-	
-		# Band abbreviation, band_id mapping
-		band_mapping = {
-			"g":"SDSS g",
-			"r":"SDSS r",
-			"i":"SDSS i",
-			"Clear":"Clear",
-			"J":"UKIRT J"
-		}
-
-		detector_mapping = {
-			"s":"SWOPE",
-			"t":"THACHER",
-			"a":"ANDICAM",
-			"n":"NICKEL",
-			"m":"MOSFIRE",
-			"k":"KAIT",
-			"si":"SINISTRO"
-		}
 
 		print("\tLoading NSIDE 128 pixels...")
 		nside128 = 128
@@ -462,8 +469,7 @@ class Teglon:
 		obs_tile_insert_data = []
 		detectors = {}
 
-		# This is only for KAIT right now...
-		tele_name = detector_mapping["si"]
+		tele_name = detector_mapping[self.options.tele]
 		detector_result = query_db([detector_select_by_name % tele_name])[0][0]
 		detector = Detector(detector_result[1], float(detector_result[2]), float(detector_result[2]))
 		detector.id = int(detector_result[0])
