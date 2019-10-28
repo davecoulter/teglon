@@ -1,8 +1,8 @@
-name: base
+name: teglon
 channels:
   - http://ssb.stsci.edu/astroconda
-  - anaconda
   - conda-forge
+  - anaconda
   - defaults
 dependencies:
   - alabaster=0.7.11
