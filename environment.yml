@@ -149,7 +149,6 @@ dependencies:
   - astroquery=0.3.8
   - automat=0.7.0
   - babel=2.6.0
-  - basemap=1.1.0
   - beautifulsoup4=4.6.3
   - bokeh=0.13.0
   - conda-env=2.6.0
