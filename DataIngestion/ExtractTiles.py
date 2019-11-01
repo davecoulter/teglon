@@ -1012,5 +1012,5 @@ python LoadMap.py --gw_id <gwid> --healpix_dir Events/<directory name> --healpix
     end = time.time()
     duration = (end - start)
     print("\n********* start DEBUG ***********")
-    print("Teglon `LoadMap` execution time: %s" % duration)
+    print("Teglon `ExtractTiles` execution time: %s" % duration)
     print("********* end DEBUG ***********\n")

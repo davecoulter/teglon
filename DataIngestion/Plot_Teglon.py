@@ -726,7 +726,7 @@ python TileCandidatesMap.py --gw_id <gwid> --healpix_file <filename> --candidate
     end = time.time()
     duration = (end - start)
     print("\n********* start DEBUG ***********")
-    print("Teglon `TileCandidatesMap` execution time: %s" % duration)
+    print("Teglon `Plot_Teglon` execution time: %s" % duration)
     print("********* end DEBUG ***********\n")
 
 
