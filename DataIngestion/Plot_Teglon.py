@@ -1,787 +1,732 @@
 import matplotlib
+
 matplotlib.use("Agg")
 
-import astropy as aa
-import numpy as np
-from astropy import units as u
-import astropy.coordinates as coord
-import healpy as hp
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
-from astropy.io import fits
 from matplotlib.patches import Polygon
-from astroquery.irsa_dust import IrsaDust
-import glob
-import random
+from matplotlib.pyplot import cm
+from matplotlib.patches import CirclePolygon
+from matplotlib import colors
+from mpl_toolkits.axes_grid1 import make_axes_locatable
+
+import sys
+
+sys.path.append('../')
+
+import os
+import optparse
+
+from configparser import RawConfigParser
+import multiprocessing as mp
+import mysql.connector
+
+import mysql.connector as test
+
+print(test.__version__)
+
+from mysql.connector.constants import ClientFlag
+from mysql.connector import Error
+import csv
+import time
+import pickle
+from collections import OrderedDict
+
+import numpy as np
 from scipy.special import erf
 from scipy.optimize import minimize, minimize_scalar
 import scipy.stats as st
-from matplotlib.pyplot import cm
-import copy
-import random 
-import pprint
-from pprint import pformat
-from ligo.skymap import distance
-from functools import reduce
-import matplotlib as mpl
 from scipy.integrate import simps
-import os
-import pickle
 from scipy.interpolate import interp2d
-from shapely import geometry
-from itertools import groupby
-import re
 
-from astropy.coordinates.angles import Angle
-
-import urllib.request
-from bs4 import BeautifulSoup
-from oauth2client import file, client, tools
-from apiclient.discovery import build
-from httplib2 import Http
-
-
-from HEALPix_Helpers import *
-from Tile import *
-from Pixel_Element import *
-from SQL_Polygon import *
-
-import xml.etree.ElementTree as ET
-
-import math
-import csv
-
-import ephem
-from dateutil.parser import parse
-from datetime import tzinfo, timedelta, datetime
-import pytz as pytz
-
-from matplotlib.patches import CirclePolygon
-from shapely.ops import transform as shapely_transform
-from shapely.geometry import Point
-from shapely.ops import unary_union
-from shapely.geometry import JOIN_STYLE
-
-
+import astropy as aa
 from astropy import cosmology
 from astropy.cosmology import WMAP5, WMAP7, LambdaCDM
 from astropy.coordinates import Distance
-import csv
-
-from matplotlib import colors
-import statistics
-from mpl_toolkits.axes_grid1 import make_axes_locatable
-
-from Plotter import *
-from Database_Helpers import *
-
+from astropy.coordinates.angles import Angle
+from astropy.cosmology import z_at_value
+from astropy import units as u
+import astropy.coordinates as coord
 from dustmaps.config import config
 from dustmaps.sfd import SFDQuery
 
-import time
+import shapely as ss
+from shapely.ops import transform as shapely_transform
+from shapely.geometry import Point
+from shapely.ops import linemerge, unary_union, polygonize, split
+from shapely import geometry
+from shapely.geometry import JOIN_STYLE
 
-LOCAL_PORT = '3306'
+import healpy as hp
+from ligo.skymap import distance
 
-class GTT:
-	def __init__(self):
+from HEALPix_Helpers import *
+from Tile import *
+from SQL_Polygon import *
+from Pixel_Element import *
+from Completeness_Objects import *
 
-		swope_deg_width = 4096*0.435/3600. # pix * plate scale / arcsec/pix => degrees
-		swope_deg_height = 4112*0.435/3600.
+import psutil
+import shutil
+import urllib.request
+import requests
+from bs4 import BeautifulSoup
+from dateutil.parser import parse
 
-		andicam_deg_width = 1024*0.371/3600.
-		andicam_deg_height = 1024*0.371/3600.
+import glob
+import gc
+import json
+
+import MySQLdb as my
 
-		thacher_deg_width = 2048*0.609/3600.
-		thacher_deg_height = 2048*0.609/3600.
+__location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
+configFile = os.path.join(__location__, 'Settings.ini')
 
-		nickel_deg_width = 2048*0.368/3600.
-		nickel_deg_height = 2048*0.368/3600.
+db_config = RawConfigParser()
+db_config.read(configFile)
+
+db_name = db_config.get('database', 'DATABASE_NAME')
+db_user = db_config.get('database', 'DATABASE_USER')
+db_pwd = db_config.get('database', 'DATABASE_PASSWORD')
+db_host = db_config.get('database', 'DATABASE_HOST')
+db_port = db_config.get('database', 'DATABASE_PORT')
 
-		mosfire_deg_width = 6.14/60.0
-		mosfire_deg_height = 6.14/60.0
+isDEBUG = False
 
-		self.telescope_mapping = {
-		"S":Detector("SWOPE", swope_deg_width, swope_deg_height),
-		"A":Detector("ANDICAM", andicam_deg_width, andicam_deg_height),
-		"T":Detector("THACHER", thacher_deg_width, thacher_deg_height),
-		"N":Detector("NICKEL", nickel_deg_width, nickel_deg_height),
-		"M":Detector("MOSFIRE", mosfire_deg_width, mosfire_deg_height)
-		}
 
-	def add_options(self, parser=None, usage=None, config=None):
-		import optparse
-		if parser == None:
-			parser = optparse.OptionParser(usage=usage, conflict_handler="resolve")
+# Database SELECT
+# For every sub-query, the iterable result is appended to a master list of results
+def bulk_upload(query):
+    success = False
+    try:
 
+        conn = mysql.connector.connect(user=db_user, password=db_pwd, host=db_host, port=db_port, database=db_name)
+        cursor = conn.cursor()
+        cursor.execute(query)
+        conn.commit()
+        success = True
 
-		parser.add_option('--telescope_abbreviation', default="", type="str",
-			help='Abbreviation for telescope. Built-in telescopes: S - Swope, A - Andicam, T - Thacher, N - Nickel. \nIf using a non-built in, use another character/char combination and provide detector width and height.')
+    except Error as e:
+        print("Error in uploading CSV!")
+        print(e)
+    finally:
+        cursor.close()
+        conn.close()
 
-		parser.add_option('--telescope_name', default="", type="str",
-			help='Name of telescope. Ignore for built-in telescopes: S - Swope, A - Andicam, T - Thacher, N - Nickel. \nIf using a non-built in, specify name.')
+    return success
 
-		parser.add_option('--detector_width_deg', default=0, type="float",
-			help='Detector width in degrees. For circular apertures, use radius for width and height.')
 
-		parser.add_option('--detector_height_deg', default=0, type="float",
-			help='Detector height in degrees. For circular apertures, use radius for width and height.')
+def query_db(query_list, commit=False):
+    # query_string = ";".join(query_list)
 
-		parser.add_option('--filter', default='r', type="string",
-							  help='Filter choice (default=%default)')
+    results = []
+    try:
+        chunk_size = 1e+6
 
-		parser.add_option('--exp_time', default='60.0', type="float",
-							  help='Exposure time (default=%default)')
+        db = my.connect(host=db_host, user=db_user, passwd=db_pwd, db=db_name, port=3306)
+        cursor = db.cursor()
 
-		parser.add_option('--healpix_dir', default='./', type="str",help='Directory for where to look for the healpix file.')
+        for q in query_list:
+            cursor.execute(q)
 
-		parser.add_option('--healpix_file', default="", type="str",
-						help='healpix filename.')
+            if commit:  # used for updates, etc
+                db.commit()
 
-		parser.add_option('--working_dir', default='./', type="str",help='Working directory for where to look for files and where to put output.')
+            streamed_results = []
+            print("\tfetching results...")
+            while True:
+                r = cursor.fetchmany(1000000)
+                count = len(r)
+                streamed_results += r
+                size_in_mb = sys.getsizeof(streamed_results) / 1.0e+6
 
-		parser.add_option('--gw_id', default="", type="str",
-						help='LIGO superevent name, e.g. `S190425z` ')
+                print("\t\tfetched: %s; current length: %s; running size: %0.3f MB" % (
+                count, len(streamed_results), size_in_mb))
 
-		parser.add_option('--event_number', default=1, type="int",
-							  help='event number (default=%default)')
+                if not r or count < chunk_size:
+                    break
 
-		parser.add_option('--schedule_designation', default='AA', type="str",
-							  help='schedule designation (default=%default)')
+        results.append(streamed_results)
 
-		parser.add_option('--percentile', default='-1', type="float",
-							  help='Percentile to tile to -- use this flag to set the percentile to < 0.90')
+    except Error as e:
+        print('Error:', e)
+    finally:
+        cursor.close()
+        db.close()
 
-		parser.add_option('--skip_completeness', action="store_true", help='If True, purely tiles sky map', default=False)
+    return results
 
-		return(parser)
 
-	def main(self):
+def batch_query(query_list):
+    return_data = []
+    batch_size = 500
+    ii = 0
+    jj = batch_size
+    kk = len(query_list)
 
-		hpx_path = "%s/%s" % (self.options.healpix_dir, self.options.healpix_file)
+    print("\nLength of data to query: %s" % kk)
+    print("Query batch size: %s" % batch_size)
+    print("Starting loop...")
 
-		# If you specify a telescope that's not in the default list, you must provide the rest of the information
-		detector = None
-		is_error = False
-		is_custom_percentile = False
-		custom_percentile = None
+    number_of_queries = len(query_list) // batch_size
+    if len(query_list) % batch_size > 0:
+        number_of_queries += 1
 
-		# Check the inputs for errors...
-		if self.options.telescope_abbreviation not in self.telescope_mapping.keys():
-			print("Running for custom telescope. Checking required parameters...")
+    query_num = 1
+    payload = []
+    while jj < kk:
+        t1 = time.time()
 
-			if self.options.telescope_abbreviation == "":
-				is_error = True
-				print("For custom telescope, `telescope_abbreviation` is required!")
+        print("%s:%s" % (ii, jj))
+        payload = query_list[ii:jj]
+        return_data += query_db(payload)
 
-			if self.options.telescope_name == "":
-				is_error = True
-				print("For custom telescope, `telescope_name` is required!")
+        ii = jj
+        jj += batch_size
+        t2 = time.time()
 
-			if self.options.detector_width_deg <= 0.0:
-				is_error = True
-				print("For custom telescope, `detector_width_deg` is required, and must be > 0!")
-
-			if self.options.detector_height_deg <= 0.0:
-				is_error = True
-				print("For custom telescope, `detector_height_deg` is required, and must be > 0!")
-
-			if not is_error:
-				detector = Detector(self.options.telescope_name, self.options.detector_width_deg, self.options.detector_height_deg)
-		else:
-			detector = self.telescope_mapping[self.options.telescope_abbreviation]
-
-
-		if self.options.percentile > 0.9:
-			is_error = True
-			print("User-defined percentile must be <= 0.90")
-		elif self.options.percentile > 0.0:
-			is_custom_percentile = True
-			custom_percentile = self.options.percentile
-
-
-		if is_error:
-			print("Exiting...")
-			return 1
-
-
-		print("\n\nTelescope: `%s -- %s`, width: %s [deg]; height %s [deg]" % (self.options.telescope_abbreviation,
-			detector.name, detector.deg_width, detector.deg_height))
-		fov_area = (detector.deg_width * detector.deg_height)
-		print("%s FOV area: %s" % (detector.name, fov_area))
-
-
-		print("Loading base cartography...")
-		base_cartography = None
-		with open('%s/%s_base_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-			base_cartography = pickle.load(handle)
-
-		# print("Loading sql pixel map...")
-		# sql_pixel_map = None
-		# with open('%s/%s_sql_pixel_map.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-		# 	sql_pixel_map = pickle.load(handle)
+        print("\n********* start DEBUG ***********")
+        print("Query %s/%s complete - execution time: %s" % (query_num, number_of_queries, (t2 - t1)))
+        print("********* end DEBUG ***********\n")
 
-		# print("Loading sql cartography...")
-		# sql_tile_cartography = None
-		# with open('%s/%s_sql_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-		# 	sql_tile_cartography = pickle.load(handle)
+        query_num += 1
 
-		# print("Loading galaxy query...")
-		# query = None
-		# with open('%s/%s_query.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-		# 	query = pickle.load(handle)
+    print("Out of loop...")
 
-		if not self.options.skip_completeness:
+    t1 = time.time()
 
-			print("Loading sql multipolygon...")
-			sql_poly = None
-			with open('%s/%s_sql_poly.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-				sql_poly = pickle.load(handle)
+    print("\n%s:%s" % (ii, kk))
 
-			# print("Loading contained galaxies...")
-			# contained_galaxies = None
-			# with open('%s/%s_contained_galaxies.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-			# 	contained_galaxies = pickle.load(handle)
+    payload = query_list[ii:kk]
+    return_data += query_db(payload)
 
-			# for g in (sorted(contained_galaxies, key=lambda x: x.relative_prob, reverse=True))[:99]:
-			# 	print(g.relative_prob)
+    t2 = time.time()
 
-			print("Loading redistributed cartography...")
-			redistributed_cartography = None
-			with open('%s/%s_redstributed_cartography.pkl' % (self.options.working_dir, self.options.gw_id), 'rb') as handle:
-				redistributed_cartography = pickle.load(handle)
+    print("\n********* start DEBUG ***********")
+    print("Query %s/%s complete - execution time: %s" % (query_num, number_of_queries, (t2 - t1)))
+    print("********* end DEBUG ***********\n")
 
+    return return_data
 
-
-
-		# print("Loading observed tiles file...")
-		# observed_tiles = {
-		# 	"S190728q":{"Thacher":{"ut190728":[]},
-		# 				"Swope":{"ut190728":[]}
-		# 			   }
-		# }
-		
-		# running_prob = 0
-		# unique_pixels = []
-		# # Thacher
-		# thacher_width = 2048*0.609/3600. #arcseconds -> deg
-		# thacher_height = 2048*0.609/3600.
-		# with open('%s/ut190727_28_Thacher_observed.txt' % self.options.working_dir,'r') as csvfile:
-		# 	csvreader = csv.reader(csvfile, delimiter=',',skipinitialspace=True)
-			
-		# 	for row in csvreader:
-		# 		name = row[0]
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), thacher_width, thacher_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		t.field_name = name
 
-		# 		t_prob = t.enclosed_pixel_indices
-		# 		for ti in t_prob:
-		# 			if ti not in unique_pixels:
-		# 				unique_pixels.append(ti)
+def insert_records(query, data):
+    _tstart = time.time()
+    success = False
+    try:
+        conn = mysql.connector.connect(user=db_user, password=db_pwd, host=db_host, port=db_port, database=db_name)
+        cursor = conn.cursor()
+        cursor.executemany(query, data)
 
-		# 		t.net_prob = np.sum(redistributed_cartography.unpacked_healpix.prob[t_prob])
-		# 		running_prob += t.net_prob
-		# 		print("%s - net prob: %s" % (name, t.net_prob))
-		# 		observed_tiles["S190728q"]["Thacher"]["ut190728"].append(t)
+        conn.commit()
+        success = True
+    except Error as e:
+        print('Error:', e)
+    finally:
+        cursor.close()
+        conn.close()
 
-		# print("\n")
-		# swope_width = 4096*0.435/3600. #arcseconds -> deg
-		# swope_height = 4112*0.435/3600.
-		# with open('%s/ut190727_28_Swope_observed.txt' % self.options.working_dir,'r') as csvfile:
-		# 	csvreader = csv.reader(csvfile, delimiter=',',skipinitialspace=True)
-			
-		# 	for row in csvreader:
-		# 		name = row[0]
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), swope_width, swope_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		t.field_name = name
+    _tend = time.time()
+    print("\n********* start DEBUG ***********")
+    print("insert_records execution time: %s" % (_tend - _tstart))
+    print("********* end DEBUG ***********\n")
+    return success
 
-		# 		t_prob = t.enclosed_pixel_indices
-
-		# 		for ti in t_prob:
-		# 			if ti not in unique_pixels:
-		# 				unique_pixels.append(ti)
-
-		# 		t.net_prob = np.sum(redistributed_cartography.unpacked_healpix.prob[t_prob])
-		# 		running_prob += t.net_prob
-		# 		print("%s - net prob: %s" % (name, t.net_prob))
-		# 		observed_tiles["S190728q"]["Swope"]["ut190728"].append(t)
-
-			
-
-		# tile_set = [
-		# 	("Thacher_0728",observed_tiles["S190728q"]["Thacher"]["ut190728"],('royalblue','None')),
-		# 	("Swope_0728",observed_tiles["S190728q"]["Swope"]["ut190728"],('green','None')),
-		# ]
-		# print("Total non-corrected prob captured by observed Thacher+Swope tiles: %s" % running_prob)
-		# print("Total corrected prob captured by observed Thacher+Swope tiles: %s" % np.sum(redistributed_cartography.unpacked_healpix.prob[np.asarray(unique_pixels)]))
 
+def batch_insert(insert_statement, insert_data, batch_size=50000):
+    _tstart = time.time()
 
-
-
-
+    i = 0
+    j = batch_size
+    k = len(insert_data)
 
-
-
-
-		print("\n\nBuilding MWE...")
-		config["data_dir"] = "./DataIngestion"
+    print("\nLength of data to insert: %s" % len(insert_data))
+    print("Insert batch size: %s" % batch_size)
+    print("Starting loop...")
 
-		print("Initializing MWE n128 pix...")
-		f99_r =  2.285
-		nside128 = 128
-		nside128_npix = hp.nside2npix(nside128)
-		nside128_pixels = []
-		nside128_RA = []
-		nside128_DEC = []
+    number_of_inserts = len(insert_data) // batch_size
+    if len(insert_data) % batch_size > 0:
+        number_of_inserts += 1
 
-		mw_pixels = []
-		for i in range(nside128_npix):
-			
-			pe = Pixel_Element(i, nside128, 0.0)
-			nside128_pixels.append(pe)
-
-			theta, phi = hp.pix2ang(pe.nside, pe.index)
-			dec = np.degrees(0.5*np.pi - theta)
-			ra = np.degrees(phi)
+    insert_num = 1
+    payload = []
+    while j < k:
+        t1 = time.time()
 
-			nside128_RA.append(ra)
-			nside128_DEC.append(dec)
-			
-		c1 = coord.SkyCoord(nside128_RA, nside128_DEC, unit=(u.deg,u.deg))
-		sfd = SFDQuery()
-		ebv1 = sfd(c1)
-		for i,e in enumerate(ebv1):
-			if e*f99_r >= 0.5:
-				mw_pixels.append(nside128_pixels[i])
-
-
-
-
-
-		tiles_to_plot = None
-		pixels_to_plot = None
-		sql_poly_to_plot = None
-		if not self.options.skip_completeness:
-			tiles_to_plot = redistributed_cartography.tiles
-			pixels_to_plot = redistributed_cartography.unpacked_healpix.pixels_90
-			sql_poly_to_plot = sql_poly
-		else:
-			tiles_to_plot = base_cartography.tiles
-			pixels_to_plot = base_cartography.unpacked_healpix.pixels_90
-		
-
-
-
-		
-		ra_tiles = []
-		dec_tiles = []
-		for i, t in enumerate(tiles_to_plot):
-			field_name = "%s%s%sE%s" % (self.options.telescope_abbreviation,
-					str(self.options.event_number).zfill(3),
-					self.options.schedule_designation,
-					str(i+1).zfill(5))
-
-			t.field_name = field_name
-			# ra_tiles.append(t.coord.ra.degree)
-			# dec_tiles.append(t.coord.dec.degree)
-			ra_tiles.append(t.ra_deg)
-			dec_tiles.append(t.dec_deg)
+        print("%s:%s" % (i, j))
+        payload = insert_data[i:j]
 
-		c = coord.SkyCoord(ra_tiles, dec_tiles, unit=(u.deg,u.deg))
-		sfd = SFDQuery()
-		ebv = sfd(c)
+        if insert_records(insert_statement, payload):
+            i = j
+            j += batch_size
+        else:
+            raise ("Error inserting batch! Exiting...")
 
-		new_tiles = []
-		for i,e in enumerate(ebv):
-			t = tiles_to_plot[i]
-			# if e*f99_r < 0.5 and t.coord.dec.degree > -30.0:
-			if e*f99_r < 0.5 and t.dec_deg < 30.0:
-				new_tiles.append(t)
-			# if t.coord.dec.degree > -30.0:
-			# 	t.mwe = e
-			# 	new_tiles.append(t)
-
-		print(len(new_tiles))
-		prob = 0.0
-		for t in new_tiles:
-			prob += t.net_prob
-
-		print("Enclosed prob = %s" % prob)
-
-
-		def GetSexigesimalString(c):
-			ra = c.ra.hms
-			dec = c.dec.dms
-
-			ra_string = "%02d:%02d:%05.2f" % (ra[0],ra[1],ra[2])
-			if dec[0] >= 0:
-				dec_string = "+%02d:%02d:%05.2f" % (dec[0],np.abs(dec[1]),np.abs(dec[2]))
-			else:
-				dec_string = "%03d:%02d:%05.2f" % (dec[0],np.abs(dec[1]),np.abs(dec[2]))
-
-			# Python has a -0.0 object. If the deg is this (because object lies < 60 min south), the string formatter will drop the negative sign
-			if c.dec < 0.0 and dec[0] == 0.0:
-				dec_string = "-00:%02d:%05.2f" % (np.abs(dec[1]),np.abs(dec[2]))
-			return (ra_string, dec_string)
-
-
-		with open('%s/%s_%s_MWE_below_30_AA.txt' % (self.options.working_dir, self.options.gw_id, detector.name),'w') as csvfile:
-
-			csvwriter = csv.writer(csvfile)
-
-			cols = []
-			cols.append('# FieldName')
-			cols.append('FieldRA')
-			cols.append('FieldDec')
-			cols.append('Telscope')
-			cols.append('Filter')
-			cols.append('ExpTime')
-			cols.append('Priority')
-			cols.append('Status')
-			# cols.append('A_R')
-			csvwriter.writerow(cols)
-
-			for i, st in enumerate(new_tiles):
-
-				# coord_str = GetSexigesimalString(st.coord) 
-				c = coord.SkyCoord(st.ra_deg, st.dec_deg, unit=(u.deg, u.deg))
-				coord_str = GetSexigesimalString(c) 
-
-				cols = []
-
-				cols.append(st.field_name)
-				cols.append(coord_str[0])
-				cols.append(coord_str[1])
-				cols.append(detector.name)
-				cols.append(self.options.filter)
-				cols.append(self.options.exp_time)
-				cols.append(st.net_prob)
-				cols.append('False')
-				# cols.append(st.mwe)
-				csvwriter.writerow(cols)
-
-			print("Done")
-		
-		# return 0;
-		# raise("Stop!")
-
-		
-		
-
-
-		# swope_width = 4096*0.435/3600. #arcseconds -> deg
-		# swope_height = 4112*0.435/3600.
-
-		# thacher_width = 2048*0.609/3600. #arcseconds -> deg
-		# thacher_height = 2048*0.609/3600.
-
-		# nickel_width = 2048*0.368/3600. #arcseconds -> deg
-		# nickel_height = 2048*0.368/3600.
-
-		# nickel_width = 2048*0.368/3600. #arcseconds -> deg
-		# nickel_height = 2048*0.368/3600.
-
-		# andicam_ccd_width = 1024*0.371/3600. #arcseconds -> deg
-		# andicam_ccd_height = 1024*0.371/3600.
-
-		# swift_uvot_width = 2048*0.502/3600. #arcseconds -> deg
-		# swift_uvot_height = 2048*0.502/3600.
-
-		# saguaro_width = 2.26 #deg
-		# saguaro_height = 2.26
-
-		# observed_tiles = {
-		# 	"S190425z":{"Swope":{"ut190425":[], "ut190428":[], "ut190429":[]},
-		# 				"Thacher":{"ut190425":[]},
-		# 				"ANDICAM":{"ut190425":[], "ut190428":[]},
-		# 				"Nickel":{"ut190425":[], "ut190429":[]},
-		# 				"Swift":{"ut190425":[]},
-		# 				"SAGUARO":{"ut190425":[]}
-		# 			   }
-		# }
-
-		# # Just do S190425z for now...
-		# # SWOPE
-		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_Swope_Tiles_Observed.csv','r') as csvfile:
-
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	next(csvreader)
-			
-		# 	for row in csvreader:
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), swope_width, swope_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		(observed_tiles["S190425z"]["Swope"]["ut190425"]).append(t)
-				
-				
-		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190428_Swope_Tiles_Observed.csv','r') as csvfile:
-
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	next(csvreader)
-			
-		# 	for row in csvreader:
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), swope_width, swope_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		(observed_tiles["S190425z"]["Swope"]["ut190428"]).append(t)
-				
-		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190429_Swope_Tiles_Observed.csv','r') as csvfile:
-
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	next(csvreader)
-			
-		# 	for row in csvreader:
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), swope_width, swope_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		(observed_tiles["S190425z"]["Swope"]["ut190429"]).append(t)
-
-		# # THACHER
-		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_Thacher_Tiles_Observed.csv','r') as csvfile:
-
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	next(csvreader)
-			
-		# 	for row in csvreader:
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), thacher_width, thacher_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		(observed_tiles["S190425z"]["Thacher"]["ut190425"]).append(t)
-
-		# # ANDICAM
-		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_ANDICAM_Tiles_Observed.csv','r') as csvfile:
-
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	next(csvreader)
-			
-		# 	for row in csvreader:
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), andicam_ccd_width, andicam_ccd_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		(observed_tiles["S190425z"]["ANDICAM"]["ut190425"]).append(t)
-				
-		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190428_ANDICAM_Tiles_Observed.csv','r') as csvfile:
-
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	next(csvreader)
-			
-		# 	for row in csvreader:
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), andicam_ccd_width, andicam_ccd_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		(observed_tiles["S190425z"]["ANDICAM"]["ut190428"]).append(t)
-
-		# # NICKEL
-		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_Nickel_Tiles_Observed.csv','r') as csvfile:
-
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	next(csvreader)
-			
-		# 	for row in csvreader:
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), nickel_width, nickel_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		(observed_tiles["S190425z"]["Nickel"]["ut190425"]).append(t)
-				
-		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190429_Nickel_Tiles_Observed.csv','r') as csvfile:
-
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	next(csvreader)
-			
-		# 	for row in csvreader:
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), nickel_width, nickel_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		(observed_tiles["S190425z"]["Nickel"]["ut190429"]).append(t)
-
-		# # Swift
-		# with open('../O3_Alerts/GW190408/GW190425_2/S190425z_ut190425_Swift_Tiles_Observed.csv','r') as csvfile:
-
-		# 	csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-		# 	next(csvreader)
-			
-		# 	for row in csvreader:
-		# 		t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.deg, u.deg)), swift_uvot_width, swift_uvot_height, redistributed_cartography.unpacked_healpix.nside)
-		# 		(observed_tiles["S190425z"]["Swift"]["ut190425"]).append(t)
-
-
-
-		# for k1,v1 in observed_tiles.items():
-		# 	print("%s" % k1)
-			
-		# 	for k2,v2 in observed_tiles[k1].items():
-		# 		print("\t%s" % k2)
-
-		# 		for k3,v3 in observed_tiles[k1][k2].items():
-		# 			print("\t\t%s - # of tiles: %s" % (k3, len(observed_tiles[k1][k2][k3])))
-						
-
-		# 	print("\n")
-
-
-		# tile_set = [
-		# 	("Swope_0425",observed_tiles["S190425z"]["Swope"]["ut190425"],('r','None')),
-		# 	("Swope_0428",observed_tiles["S190425z"]["Swope"]["ut190428"],('r','None')),
-		# 	("Swope_0429",observed_tiles["S190425z"]["Swope"]["ut190429"],('r','None')),
-			
-		# 	("Thacher_0425",observed_tiles["S190425z"]["Thacher"]["ut190425"],('royalblue','None')),
-			
-		# 	("ANDICAM_0425",observed_tiles["S190425z"]["ANDICAM"]["ut190425"],('forestgreen','None')),
-		# 	("ANDICAM_0428",observed_tiles["S190425z"]["ANDICAM"]["ut190428"],('forestgreen','None')),
-			
-		# 	("Nickel_0425",observed_tiles["S190425z"]["Nickel"]["ut190425"],('mediumorchid','None')),
-		# 	("Nickel_0429",observed_tiles["S190425z"]["Nickel"]["ut190429"],('mediumorchid','None')),
-			
-		# 	("Swift_0425",observed_tiles["S190425z"]["Swift"]["ut190425"],('k','None'))
-		# ]
-
-
-
-		# # In case you want to plot contours...
-		# print("Computing contours for '%s'...\n" % base_cartography.unpacked_healpix.file_name)
-		# base_cartography.unpacked_healpix.compute_contours()
-
-		# print("Computing contours for '%s'...\n" % redistributed_cartography.unpacked_healpix.file_name)
-		# redistributed_cartography.unpacked_healpix.compute_contours()
-
-
-
-		# # Thacher
-		# thacher_tiles = []
-		# with open('%s/S190521g_AA_THACHER_Tiles.txt' % self.options.working_dir,'r') as csvfile:
-
-		#     csvreader = csv.reader(csvfile, delimiter=',')
-		#     next(csvreader)
-			
-		#     for row in csvreader:
-		#         t = Tile(coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg)), detector.deg_width, detector.deg_height, 
-		#                  redistributed_cartography.unpacked_healpix.nside)
-		#         t.field_name = row[0]
-		#         t.net_prob = np.sum(redistributed_cartography.unpacked_healpix.prob[t.enclosed_pixel_indices])
-
-  #       		print("Tile #: %s; Net prob: %0.4f" % (t.field_name, t.net_prob))
-
-		#         thacher_tiles.append(t)
-
-
-
-		# above_30 = []
-		# for t in thacher_tiles:
-		# 	if t.coord.dec.degree > -30.0:
-		# 		above_30.append(t)
-
-		# sorted_tiles = sorted(above_30, key=lambda t: t.net_prob, reverse=True)
-		# print("Number of northern tiles: %s" % len(sorted_tiles))
-
-		# top_200 = sorted_tiles[0:199]
-		# top_200_prob = np.sum([t.net_prob for t in top_200])
-		# print("Prob of northern, top 200: %s" % top_200_prob)
-
-		# top_200_area = fov_area*200
-		# print("Area of northern, top 200: %s" % top_200_area)
-
-		
-
-		# with open('%s/S190521g_AA_THACHER_Tiles_Northern_200.txt' % self.options.working_dir,'w') as csvfile:
-
-		# 	csvwriter = csv.writer(csvfile)
-
-		# 	cols = []
-		# 	cols.append('# FieldName')
-		# 	cols.append('FieldRA')
-		# 	cols.append('FieldDec')
-		# 	cols.append('Telscope')
-		# 	cols.append('Filter')
-		# 	cols.append('ExpTime')
-		# 	cols.append('Priority')
-		# 	cols.append('Status')
-		# 	csvwriter.writerow(cols)
-
-		# 	for i, st in enumerate(top_200):
-
-		# 		coord_str = GetSexigesimalString(st.coord) 
-
-		# 		cols = []
-				
-		# 		cols.append(st.field_name)
-		# 		cols.append(coord_str[0])
-		# 		cols.append(coord_str[1])
-		# 		cols.append(detector.name)
-		# 		cols.append(self.options.filter)
-		# 		cols.append(self.options.exp_time)
-		# 		print(st.net_prob)
-		# 		cols.append(st.net_prob)
-		# 		cols.append('False')
-		# 		csvwriter.writerow(cols)
-
-		# 	print("Done")
-
-
-		# test = []
-		# for t in base_cartography.tiles:
-		# 	test.append(t.polygon)
-
-		# # print("here")
-		# # print(list(test[0].exterior.coords))
-		# # print("\n\n")
-
-		# test2 = unary_union(test)
-		# # print(type(test2))
-
-		
-		# eps = 0.00001
-		# test3 = test2.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
-
-
-		# plot_probability_map("%s/%s_SQL_Pixels" % (self.options.working_dir, self.options.gw_id),
-		# 			 pixels_filled=base_cartography.unpacked_healpix.pixels_90,
-		# 			 # tiles=base_cartography.tiles,
-		# 			 # pixels_empty=base_cartography.unpacked_healpix.pixels_90,
-		# 			 colormap=plt.cm.viridis,
-		# 			 linear_rings=test3)
-
-
-		# pixels_90 = [Pixel_Element(i90, redistributed_cartography.unpacked_healpix.nside, 
-		# 							redistributed_cartography.unpacked_healpix.prob[i90]) 
-		# 							for i90 in redistributed_cartography.unpacked_healpix.indices_of_90]
-
-		plot_probability_map("%s/%s_%s_Redistributed_90th_Tiles" % (self.options.working_dir, self.options.gw_id, detector.name),
-					 # pixels_filled=redistributed_cartography.unpacked_healpix.pixels_90,
-					 pixels_filled=pixels_to_plot,
-					 # galaxies=contained_galaxies,
-					 galaxies=mw_pixels,
-					 tiles=new_tiles,
-					 # tiles=redistributed_cartography.tiles,
-					 # tiles=base_cartography.tiles,
-					 # sql_poly=sql_poly,
-					 # sql_poly=sql_poly_to_plot,
-					 # linear_rings=sql_poly.polygon,
-					 # healpix_obj_for_contours=base_cartography.unpacked_healpix,
-					 # tile_set=tile_set
-					 )
-
-
-		# plot_probability_map_2("%s/%s_%s_Redistributed_90th_Tiles" % (self.options.working_dir, self.options.gw_id, detector.name),
-		# 				central_lon=330,
-		# 				 central_lat=30,
-		# 				 lower_left_corner_lat=15,
-		# 				 lower_left_corner_lon=345,
-		# 				 upper_right_corner_lat=45,
-		# 				 upper_right_corner_lon=315,
-		# 			 pixels=redistributed_cartography.unpacked_healpix.pixels_90,
-		# 			 tiles=redistributed_cartography.tiles)
+        t2 = time.time()
+
+        print("\n********* start DEBUG ***********")
+        print("INSERT %s/%s complete - execution time: %s" % (insert_num, number_of_inserts, (t2 - t1)))
+        print("********* end DEBUG ***********\n")
+
+        insert_num += 1
+
+    print("Out of loop...")
+
+    t1 = time.time()
+
+    print("\n%s:%s" % (i, k))
+
+    payload = insert_data[i:k]
+    if not insert_records(insert_statement, payload):
+        raise ("Error inserting batch! Exiting...")
+
+    t2 = time.time()
+
+    print("\n********* start DEBUG ***********")
+    print("INSERT %s/%s complete - execution time: %s" % (insert_num, number_of_inserts, (t2 - t1)))
+    print("********* end DEBUG ***********\n")
+
+    _tend = time.time()
+
+    print("\n********* start DEBUG ***********")
+    print("batch_insert execution time: %s" % (_tend - _tstart))
+    print("********* end DEBUG ***********\n")
+
+
+# Set up dustmaps config
+config["data_dir"] = "./"
+
+# Generate all pixel indices
+cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
+
+
+def get_healpix_pixel_id(galaxy_info):
+    phi, theta = np.radians(float(galaxy_info[8])), 0.5 * np.pi - np.radians(float(galaxy_info[9]))
+
+    # map NSIDE is last argument of galaxy_info
+    # return the galaxy_id with the pixel index in the NSIDE of the healpix map
+    return (galaxy_info[0], hp.ang2pix(int(galaxy_info[-1]), theta, phi))
+
+
+class Teglon:
+
+    def add_options(self, parser=None, usage=None, config=None):
+        import optparse
+        if parser == None:
+            parser = optparse.OptionParser(usage=usage, conflict_handler="resolve")
+
+        parser.add_option('--gw_id', default="", type="str",
+                          help='LIGO superevent name, e.g. `S190425z` ')
+
+        parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",
+                          help='Directory for where to look for the healpix file.')
+
+        parser.add_option('--healpix_file', default="", type="str", help='Healpix filename.')
+
+        parser.add_option('--tele', default="s", type="str",
+                          help='''Telescope abbreviation for the telescope to extract files for. Default: `s`. 
+                          Available: (s:Swope, t:Thacher)
+                          ''')
+
+        parser.add_option('--band', default="r", type="str",
+                          help='Telescope abbreviation for the telescope to extract files for. Default: `r`. Available: (g, r, i)')
+
+        parser.add_option('--extinct', default="0.5", type="float",
+                          help='Extinction in mags in the specified band to be less than. Default: 0.5 mag. Must be > 0.0')
+
+        parser.add_option('--tile_file', default="{FILENAME}", type="str", help='Filename of tiles to plot.')
+
+        parser.add_option('--prob_type', default="2D", type="str",
+                          help='''Probability type to consider. Default `2D`. Available: (4D, 2D)''')
+
+        parser.add_option('--cum_prob_outer', default="0.9", type="float",
+                          help='''Cumulative prob to cover in tiles. Default 0.9. Must be > 0.2 and < 0.95 
+                          and > `cum_prob_inner`''')
+
+        parser.add_option('--cum_prob_inner', default="0.5", type="float",
+                          help='''Cumulative prob to cover in tiles. Default 0.5. Must be > 0.2 and < 0.95 
+                          and < `cum_prob_inner`''')
+
+        return (parser)
+
+    def main(self):
+
+        detector_mapping = {
+            "s": "SWOPE",
+            "t": "THACHER"
+        }
+
+        band_mapping = {
+            "g": "SDSS g",
+            "r": "SDSS r",
+            "i": "SDSS i"
+        }
+
+        # Valid prob types
+        _4D = "4D"
+        _2D = "2D"
+
+        is_error = False
+
+        # Parameter checks
+        if self.options.gw_id == "":
+            is_error = True
+            print("GWID is required.")
+
+        formatted_healpix_dir = self.options.healpix_dir
+        if "{GWID}" in formatted_healpix_dir:
+            formatted_healpix_dir = formatted_healpix_dir.replace("{GWID}", self.options.gw_id)
+
+        hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
+        tile_file_path = "%s/%s" % (formatted_healpix_dir, self.options.tile_file)
+
+        if self.options.healpix_file == "":
+            is_error = True
+            print("You must specify which healpix file to process.")
+
+        if self.options.tele not in detector_mapping:
+            is_error = True
+            print("Invalid telescope selection. Available telescopes: %s" % detector_mapping.keys())
+
+        if not os.path.exists(tile_file_path):
+            is_error = True
+            print("You must specify which tile file to plot.")
+
+        if self.options.band not in band_mapping:
+            is_error = True
+            print("Invalid band selection. Available bands: %s" % band_mapping.keys())
+
+        if self.options.extinct <= 0.0:
+            is_error = True
+            print("Extinction must be a valid float > 0.0")
+
+        if not (self.options.prob_type == _4D or self.options.prob_type == _2D):
+            is_error = True
+            print("Prob type must either be `4D` or `2D`")
+
+        if self.options.cum_prob_outer > 0.95 or \
+                self.options.cum_prob_outer < 0.20 or \
+                self.options.cum_prob_outer < self.options.cum_prob_inner:
+            is_error = True
+            print("Cum prob outer must be between 0.2 and 0.95 and > Cum prob inner")
+
+        if self.options.cum_prob_inner > 0.95 or \
+                self.options.cum_prob_inner < 0.20 or \
+                self.options.cum_prob_inner > self.options.cum_prob_outer:
+            is_error = True
+            print("Cum prob inner must be between 0.2 and 0.95 and < Cum prob outer")
+
+
+        if is_error:
+            print("Exiting...")
+            return 1
+
+        # Get Map ID
+        healpix_map_select = "SELECT id, RescaledNSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
+        healpix_map_result = query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0]
+        healpix_map_id = int(healpix_map_result[0])
+        healpix_map_nside = int(healpix_map_result[1])
+
+        telescope_name = detector_mapping[self.options.tele]
+        detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec FROM Detector WHERE Name='%s'"
+        detector_result = query_db([detector_select_by_name % telescope_name])[0][0]
+        detector_id = int(detector_result[0])
+        detector = Detector(detector_result[1], float(detector_result[2]), float(detector_result[3]), detector_id=detector_id)
+
+        band_name = band_mapping[self.options.band]
+        band_select = "SELECT id, Name, F99_Coefficient FROM Band WHERE `Name`='%s'"
+        band_result = query_db([band_select % band_name])[0][0]
+        band_id = band_result[0]
+        band_F99 = float(band_result[2])
+
+        # Load tile_file
+        tiles_to_plot = []
+        with open('%s' % tile_file_path,'r') as csvfile:
+            csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+            # Skip Header
+            next(csvreader)
+
+            for row in csvreader:
+                name = row[0]
+                c = coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg))
+                t = Tile(c.ra.degree, c.dec.degree, detector.deg_width, detector.deg_height, healpix_map_nside)
+                t.field_name = name
+                t.net_prob = float(row[6])
+                tiles_to_plot.append(t)
+
+        select_2D_pix = '''
+            SELECT 
+                running_prob.id, 
+                running_prob.HealpixMap_id, 
+                running_prob.Pixel_Index, 
+                running_prob.Prob, 
+                running_prob.Distmu, 
+                running_prob.Distsigma, 
+                running_prob.Mean, 
+                running_prob.Stddev, 
+                running_prob.Norm, 
+                running_prob.N128_SkyPixel_id, 
+                running_prob.cum_prob 
+            FROM 
+                (SELECT 
+                    hp_prob.id, 
+                    hp_prob.HealpixMap_id, 
+                    hp_prob.Pixel_Index,
+                    hp_prob.Prob, 
+                    hp_prob.Distmu, 
+                    hp_prob.Distsigma, 
+                    hp_prob.Mean, 
+                    hp_prob.Stddev, 
+                    hp_prob.Norm, 
+                    hp_prob.N128_SkyPixel_id, 
+                    SUM(hp_prob.Prob) OVER(ORDER BY hp_prob.Prob DESC) AS cum_prob 
+                FROM 
+                    (SELECT 
+                        hp.id, 
+                        hp.HealpixMap_id, 
+                        hp.Pixel_Index,
+                        hp.Prob, 
+                        hp.Distmu, 
+                        hp.Distsigma, 
+                        hp.Mean, 
+                        hp.Stddev, 
+                        hp.Norm, 
+                        hp.N128_SkyPixel_id 
+                    FROM HealpixPixel hp 
+                    WHERE hp.HealpixMap_id = %s 
+                    ORDER BY
+                        hp.Prob DESC) hp_prob
+                    GROUP BY
+                        hp_prob.id, 
+                        hp_prob.HealpixMap_id, 
+                        hp_prob.Pixel_Index,
+                        hp_prob.Prob, 
+                        hp_prob.Distmu, 
+                        hp_prob.Distsigma, 
+                        hp_prob.Mean, 
+                        hp_prob.Stddev, 
+                        hp_prob.Norm, 
+                        hp_prob.N128_SkyPixel_id 
+                    ) running_prob 
+            WHERE 
+                running_prob.cum_prob <= %s
+        '''
+
+        select_4D_pix = '''
+            SELECT 
+                running_prob.id, 
+                running_prob.HealpixMap_id, 
+                running_prob.Pixel_Index, 
+                running_prob.Prob, 
+                running_prob.NetPixelProb, 
+                running_prob.Distmu, 
+                running_prob.Distsigma, 
+                running_prob.Mean, 
+                running_prob.Stddev, 
+                running_prob.Norm, 
+                running_prob.N128_SkyPixel_id, 
+                running_prob.cum_net_pixel_prob 
+            FROM 
+                (SELECT 
+                    hp_prob.id, 
+                    hp_prob.HealpixMap_id, 
+                    hp_prob.Pixel_Index,
+                    hp_prob.Prob, 
+                    hp_prob.NetPixelProb, 
+                    hp_prob.Distmu, 
+                    hp_prob.Distsigma, 
+                    hp_prob.Mean, 
+                    hp_prob.Stddev, 
+                    hp_prob.Norm, 
+                    hp_prob.N128_SkyPixel_id, 
+                    SUM(hp_prob.NetPixelProb) OVER(ORDER BY hp_prob.NetPixelProb DESC) AS cum_net_pixel_prob 
+                FROM 
+                    (SELECT 
+                        hp.id, 
+                        hp.HealpixMap_id, 
+                        hp.Pixel_Index,
+                        hp.Prob, 
+                        hpc.NetPixelProb, 
+                        hp.Distmu, 
+                        hp.Distsigma, 
+                        hp.Mean, 
+                        hp.Stddev, 
+                        hp.Norm, 
+                        hp.N128_SkyPixel_id 
+                    FROM HealpixPixel hp 
+                    JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp.id
+                    WHERE hp.HealpixMap_id = %s 
+                    ORDER BY
+                        hpc.NetPixelProb DESC) hp_prob 
+                    GROUP BY
+                        hp_prob.id, 
+                        hp_prob.HealpixMap_id, 
+                        hp_prob.Pixel_Index,
+                        hp_prob.Prob, 
+                        hp_prob.NetPixelProb, 
+                        hp_prob.Distmu, 
+                        hp_prob.Distsigma, 
+                        hp_prob.Mean, 
+                        hp_prob.Stddev, 
+                        hp_prob.Norm, 
+                        hp_prob.N128_SkyPixel_id 
+                    ) running_prob 
+            WHERE 
+                running_prob.cum_net_pixel_prob <= %s 
+        '''
+
+        select_mwe_pix = '''
+            SELECT sp.Pixel_Index
+            FROM SkyPixel sp
+            WHERE sp.id IN
+            (
+                SELECT sp.Parent_Pixel_id
+                FROM SkyPixel sp
+                WHERE sp.id IN
+                (
+                    SELECT sp.Parent_Pixel_id
+                    FROM SkyPixel sp
+                    JOIN SkyPixel_EBV sp_ebv ON sp_ebv.N128_SkyPixel_id = sp.id
+                    WHERE sp_ebv.EBV*%s > %s and NSIDE = 128
+                ) and NSIDE = 64
+            ) and NSIDE = 32
+        '''
+
+        print("Selecting map pixels...")
+        pixels_to_select = ""
+        if self.options.prob_type == _2D:
+            pixels_to_select = select_2D_pix % (healpix_map_id, self.options.cum_prob_outer)
+        else:
+            pixels_to_select = select_4D_pix % (healpix_map_id, self.options.cum_prob_outer)
+
+        map_pix_result = query_db([pixels_to_select])[0]
+
+        mwe_pix_result = query_db([select_mwe_pix % (band_F99, self.options.extinct)])[0]
+        print("...done")
+
+        print("Building pixel elements...")
+        map_pix = [Pixel_Element(int(mp[2]), healpix_map_nside, float(mp[3]), pixel_id=int(mp[0]))
+                   for mp in map_pix_result]
+        map_pix_sorted = sorted(map_pix, key=lambda p: p.prob, reverse=True)
+
+        mwe_pix = [Pixel_Element(int(mp[0]), 32, 0.0) for mp in mwe_pix_result]
+        print("...done")
+
+        cutoff_inner = self.options.cum_prob_inner
+        cutoff_outer = self.options.cum_prob_outer
+        index_inner = 0
+        index_outer = 0
+
+        print("Find index for inner contour...")
+        cum_prob = 0.0
+        for i in range(len(map_pix_sorted)):
+            cum_prob += map_pix_sorted[i].prob
+            index_inner = i
+            if cum_prob >= cutoff_inner:
+                break
+        print("... %s" % index_inner)
+
+        print("Find index for outer contour...")
+        cum_prob = 0.0
+        for i in range(len(map_pix_sorted)):
+            cum_prob += map_pix_sorted[i].prob
+            index_outer = i
+            if cum_prob >= cutoff_outer:
+                break
+        print("... %s" % index_outer)
+
+        print("Build multipolygons...")
+        net_inner_polygon = []
+        for p in map_pix_sorted[0:index_inner]:
+            net_inner_polygon += p.query_polygon
+        joined_inner_poly = unary_union(net_inner_polygon)
+
+        # Fix any seams
+        eps = 0.00001
+        merged_inner_poly = []
+        smoothed_inner_poly = joined_inner_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+
+        try:
+            test_iter = iter(smoothed_inner_poly)
+            merged_inner_poly = smoothed_inner_poly
+        except TypeError as te:
+            merged_inner_poly.append(smoothed_inner_poly)
+
+        print("Number of sub-polygons in `merged_inner_poly`: %s" % len(merged_inner_poly))
+        sql_inner_poly = SQL_Polygon(merged_inner_poly, detector)
+
+        net_outer_polygon = []
+        for p in map_pix_sorted[0:index_outer]:
+            net_outer_polygon += p.query_polygon
+        joined_outer_poly = unary_union(net_outer_polygon)
+
+        # Fix any seams
+        merged_outer_poly = []
+        smoothed_outer_poly = joined_outer_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+
+        try:
+            test_iter = iter(smoothed_outer_poly)
+            merged_outer_poly = smoothed_outer_poly
+        except TypeError as te:
+            merged_outer_poly.append(smoothed_outer_poly)
+
+        print("Number of sub-polygons in `merged_outer_poly`: %s" % len(merged_outer_poly))
+        sql_outer_poly = SQL_Polygon(merged_outer_poly, detector)
+        print("... done.")
+
+        # Plot!!
+        fig = plt.figure(figsize=(10, 10), dpi=800)
+        ax = fig.add_subplot(111)
+        m = Basemap(projection='moll', lon_0=180.0)
+
+        sql_inner_poly.plot(m, ax, edgecolor='black', linewidth=0.5, facecolor='None')
+        sql_outer_poly.plot(m, ax, edgecolor='gray', linewidth=0.5, facecolor='None')
+
+        for p in mwe_pix:
+            p.plot(m, ax, edgecolor='None', linewidth=0.5, facecolor='cornflowerblue', alpha=0.5)
+
+        print("Plotting (%s) Tiles..." % len(tiles_to_plot))
+        for i, t in enumerate(tiles_to_plot):
+            t.plot(m, ax, edgecolor='r', facecolor='None', linewidth=0.25, alpha=1.0, zorder=9900)
+
+        # # # -------------- Use this for mollweide projections --------------
+        meridians = np.arange(0., 360., 60.)
+        m.drawparallels(np.arange(-90., 91., 30.), fontsize=14, labels=[True, True, False, False], dashes=[2, 2],
+                        linewidth=0.5) # , xoffset=2500000
+        m.drawmeridians(meridians, labels=[False, False, False, False], dashes=[2, 2], linewidth=0.5)
+        # # # ----------------------------------------------------------------
+
+        ax.invert_xaxis()
+
+        plt.ylabel(r'$\mathrm{Declination}$', fontsize=16, labelpad=36)
+        plt.xlabel(r'$\mathrm{Right\;Ascension}$', fontsize=16, labelpad=30)
+
+        output_path = "%s/%s" % (formatted_healpix_dir, self.options.tile_file.replace(".csv", ".png"))
+        fig.savefig(output_path, bbox_inches='tight')  # ,dpi=840
+        plt.close('all')
+        print("... Done.")
 
 
 if __name__ == "__main__":
-	
-	import os
-	import optparse
+    useagestring = """python TileCandidatesMap.py [options]
 
-	useagestring="""python Generate_Plots.py [options]
-
-Default telescope example:
-python Generate_Tiles.py --gw_id S190425z --healpix_dir S190521g --healpix_file bayestar.fits.gz,0 --working_dir S190521g_Swope  --event_number 14 --telescope_abbreviation S --filter r --exp_time 180 --schedule_designation AA
-
-Custom telescope example:
-python Generate_Tiles.py --gw_id S190425z --healpix_dir S190521g --healpix_file bayestar.fits.gz,0 --working_dir S190521g_SOAR  --event_number 14 --telescope_abbreviation SO --telescope_name SOAR --detector_width_deg 0.12 --detector_height_deg 0.12 --filter r --exp_time 180 --schedule_designation AA
+Example with healpix_dir defaulted to 'Events/<gwid>':
+python TileCandidatesMap.py --gw_id <gwid> --healpix_file <filename> --candidate_file <filename>
 """
-	
-	start = time.time()
 
+    start = time.time()
 
-	gtt = GTT()
-	parser = gtt.add_options(usage=useagestring)
-	options,  args = parser.parse_args()
-	gtt.options = options
-	
-	gtt.main()
+    teglon = Teglon()
+    parser = teglon.add_options(usage=useagestring)
+    options, args = parser.parse_args()
+    teglon.options = options
 
-	end = time.time()
-	duration = (end - start)
-	print("Execution time: %s" % duration)
+    teglon.main()
+
+    end = time.time()
+    duration = (end - start)
+    print("\n********* start DEBUG ***********")
+    print("Teglon `TileCandidatesMap` execution time: %s" % duration)
+    print("********* end DEBUG ***********\n")
 
 
