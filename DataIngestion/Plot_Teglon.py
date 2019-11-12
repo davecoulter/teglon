@@ -336,6 +336,11 @@ class Teglon:
 
         parser.add_option('--tile_file', default="{FILENAME}", type="str", help='Filename of tiles to plot.')
 
+        parser.add_option('--galaxies_file', default="{FILENAME}", type="str", help='Optional: Filename of galaxies to plot.')
+
+        parser.add_option('--get_tiles_from_db', action="store_true", default=False,
+                          help='''Ignore tile file and get all observed tiles for map from database''')
+
         parser.add_option('--prob_type', default="2D", type="str",
                           help='''Probability type to consider. Default `2D`. Available: (4D, 2D)''')
 
@@ -353,13 +358,16 @@ class Teglon:
 
         detector_mapping = {
             "s": "SWOPE",
-            "t": "THACHER"
+            "t": "THACHER",
+            "n": "NICKEL",
+            "k": "KAIT"
         }
 
         band_mapping = {
             "g": "SDSS g",
             "r": "SDSS r",
-            "i": "SDSS i"
+            "i": "SDSS i",
+            "Clear": "Clear"
         }
 
         # Valid prob types
@@ -379,22 +387,28 @@ class Teglon:
 
         hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
         tile_file_path = "%s/%s" % (formatted_healpix_dir, self.options.tile_file)
+        galaxies_file_path = "%s/%s" % (formatted_healpix_dir, self.options.galaxies_file)
 
         if self.options.healpix_file == "":
             is_error = True
             print("You must specify which healpix file to process.")
 
+        if self.options.band not in band_mapping:
+            is_error = True
+            print("Invalid band selection. Available bands: %s" % band_mapping.keys())
+
         if self.options.tele not in detector_mapping:
             is_error = True
             print("Invalid telescope selection. Available telescopes: %s" % detector_mapping.keys())
 
-        if not os.path.exists(tile_file_path):
-            is_error = True
-            print("You must specify which tile file to plot.")
+        if not self.options.get_tiles_from_db:
+            if not os.path.exists(tile_file_path):
+                is_error = True
+                print("You must specify which tile file to plot.")
 
-        if self.options.band not in band_mapping:
-            is_error = True
-            print("Invalid band selection. Available bands: %s" % band_mapping.keys())
+        plotGalaxies = False
+        if os.path.exists(galaxies_file_path):
+            plotGalaxies = True
 
         if self.options.extinct <= 0.0:
             is_error = True
@@ -416,7 +430,6 @@ class Teglon:
             is_error = True
             print("Cum prob inner must be between 0.2 and 0.95 and < Cum prob outer")
 
-
         if is_error:
             print("Exiting...")
             return 1
@@ -427,32 +440,80 @@ class Teglon:
         healpix_map_id = int(healpix_map_result[0])
         healpix_map_nside = int(healpix_map_result[1])
 
-        telescope_name = detector_mapping[self.options.tele]
-        detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec FROM Detector WHERE Name='%s'"
-        detector_result = query_db([detector_select_by_name % telescope_name])[0][0]
-        detector_id = int(detector_result[0])
-        detector = Detector(detector_result[1], float(detector_result[2]), float(detector_result[3]), detector_id=detector_id)
-
         band_name = band_mapping[self.options.band]
         band_select = "SELECT id, Name, F99_Coefficient FROM Band WHERE `Name`='%s'"
         band_result = query_db([band_select % band_name])[0][0]
         band_id = band_result[0]
         band_F99 = float(band_result[2])
 
-        # Load tile_file
-        tiles_to_plot = []
-        with open('%s' % tile_file_path,'r') as csvfile:
-            csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
-            # Skip Header
-            next(csvreader)
+        telescope_name = detector_mapping[self.options.tele]
+        detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec FROM Detector WHERE Name='%s'"
+        detector_result = query_db([detector_select_by_name % telescope_name])[0][0]
+        detector_id = int(detector_result[0])
+        detector = Detector(detector_result[1], float(detector_result[2]), float(detector_result[3]),
+                            detector_id=detector_id)
 
-            for row in csvreader:
-                name = row[0]
-                c = coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg))
-                t = Tile(c.ra.degree, c.dec.degree, detector.deg_width, detector.deg_height, healpix_map_nside)
-                t.field_name = name
-                t.net_prob = float(row[6])
+        galaxies_to_plot = []
+        gal_ra = []
+        gal_dec = []
+        if plotGalaxies:
+            with open('%s' % galaxies_file_path, 'r') as csvfile:
+                csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+                # Skip Header
+                next(csvreader)
+
+                for row in csvreader:
+                    gal_ra.append(row[1])
+                    gal_dec.append(row[2])
+
+                galaxies_to_plot = coord.SkyCoord(gal_ra, gal_dec, unit=(u.hour, u.deg))
+
+        tiles_to_plot = []
+        if not self.options.get_tiles_from_db:
+            # Load tile_file
+            with open('%s' % tile_file_path,'r') as csvfile:
+                csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+                # Skip Header
+                next(csvreader)
+
+                for row in csvreader:
+                    name = row[0]
+                    c = coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg))
+                    t = Tile(c.ra.degree, c.dec.degree, detector.deg_width, detector.deg_height, healpix_map_nside)
+                    t.field_name = name
+                    t.net_prob = float(row[6])
+                    tiles_to_plot.append(t)
+        else:
+            select_tiles_per_map = '''
+                SELECT 
+                    ot.FieldName, 
+                    ot.RA, 
+                    ot._Dec, 
+                    ot.MJD, 
+                    ot.Exp_Time, 
+                    ot.Mag_Lim, 
+                    d.`Name` as DetectorName, 
+                    d.Deg_width, 
+                    d.Deg_height
+                FROM ObservedTile ot
+                JOIN Detector d on d.id = ot.Detector_id
+                WHERE ot.HealpixMap_id = %s;
+            '''
+
+            map_tiles = query_db([select_tiles_per_map % healpix_map_id])[0]
+            print("Map tiles: %s" % len(map_tiles))
+            for mt in map_tiles:
+                c = coord.SkyCoord(mt[1], mt[2], unit=(u.deg, u.deg))
+                t = Tile(c.ra.degree, c.dec.degree, float(mt[7]), float(mt[8]), healpix_map_nside)
+                t.field_name = mt[6]
                 tiles_to_plot.append(t)
+
+        tile_colors = {
+            'KAIT': "seagreen",
+            'NICKEL': "mediumpurple",
+            'SWOPE': "red",
+            'THACHER': "darkorange"
+        }
 
         select_2D_pix = '''
             SELECT 
@@ -686,8 +747,20 @@ class Teglon:
             p.plot(m, ax, edgecolor='None', linewidth=0.5, facecolor='cornflowerblue', alpha=0.5)
 
         print("Plotting (%s) Tiles..." % len(tiles_to_plot))
-        for i, t in enumerate(tiles_to_plot):
-            t.plot(m, ax, edgecolor='r', facecolor='None', linewidth=0.25, alpha=1.0, zorder=9900)
+        if not self.options.get_tiles_from_db:
+            for i, t in enumerate(tiles_to_plot):
+                t.plot(m, ax, edgecolor='r', facecolor='None', linewidth=0.25, alpha=1.0,
+                       zorder=9900)
+        else:
+            for i, t in enumerate(tiles_to_plot):
+                t.plot(m, ax, edgecolor=tile_colors[t.field_name], facecolor='None', linewidth=0.25, alpha=1.0,
+                       zorder=9900)
+
+        print("Plotting (%s) Galaxies..." % len(galaxies_to_plot))
+        if plotGalaxies:
+            for g in galaxies_to_plot:
+                x, y = m(g.ra.degree, g.dec.degree)
+                m.plot(x,y, 'ko', markersize=0.2, linewidth=0.25, alpha=0.3, zorder=9900)
 
         # # # -------------- Use this for mollweide projections --------------
         meridians = np.arange(0., 360., 60.)

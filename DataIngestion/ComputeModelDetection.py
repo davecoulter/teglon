@@ -516,7 +516,8 @@ class Teglon:
 			JOIN ObservedTile ot on ot.id = ot_hp.ObservedTile_id 
 			JOIN SkyPixel sp on sp.id = hp.N128_SkyPixel_id 
 			WHERE
-				ot.HealpixMap_id = %s
+				ot.HealpixMap_id = %s and 
+				ot.Mag_Lim IS NOT NULL 
 		'''
 
         q = map_pixel_select % healpix_map_id
@@ -658,7 +659,8 @@ class Teglon:
 				ObservedTile 
 			WHERE
 				HealpixMap_id = %s and 
-				Detector_id = %s 
+				Detector_id = %s and 
+				Mag_Lim IS NOT NULL 
 		'''
 
         observed_tiles = []

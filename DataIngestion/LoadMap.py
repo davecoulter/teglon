@@ -393,7 +393,8 @@ class Teglon:
             return 1
 
         ### Quantities that are required ###
-        nside128 = 128
+        nside128 = 256
+        # nside256 = 256
         prob = None
         distmu = None
         distsigma = None
@@ -678,7 +679,7 @@ class Teglon:
             norm[norm > max_double_value] = max_double_value
 
             theta, phi = hp.pix2ang(map_nside, range(len(prob)))
-            N128_indices = hp.ang2pix(nside128, theta, phi)
+            N128_indices = hp.ang2pix(128, theta, phi) # Change me
 
             healpix_pixel_data = []
             for i, n128_i in enumerate(N128_indices):
@@ -1507,7 +1508,7 @@ if __name__ == "__main__":
     useagestring = """python Generate_Tiles.py [options]
 
 Example with healpix_dir defaulted to 'Events/<gwid>':
-python LoadMap.py --gw_id <>gwid --healpix_file <filename>
+python LoadMap.py --gw_id <gwid> --healpix_file <filename>
 
 Example with healpix_dir specified:
 python LoadMap.py --gw_id <gwid> --healpix_dir Events/<directory name> --healpix_file <filename>
