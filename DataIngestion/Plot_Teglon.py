@@ -781,10 +781,10 @@ class Teglon:
 
 
 if __name__ == "__main__":
-    useagestring = """python TileCandidatesMap.py [options]
+    useagestring = """python Plot_Teglon.py [options]
 
-Example with healpix_dir defaulted to 'Events/<gwid>':
-python TileCandidatesMap.py --gw_id <gwid> --healpix_file <filename> --candidate_file <filename>
+python Plot_Teglon.py --gw_id <gwid> --healpix_file <filename> --extinct 0.50 --prob_type 2D --cum_prob_outer 0.90 
+--cum_prob_inner 0.50 --band r --tile_file <FILENAME> --tele s --galaxies_file <FILENAME> 
 """
 
     start = time.time()
