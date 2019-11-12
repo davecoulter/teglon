@@ -371,6 +371,8 @@ class Teglon:
 
     def main(self):
 
+        healpix_map_select = "SELECT id, NSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
+
         is_error = False
 
         # Parameter checks
@@ -387,6 +389,12 @@ class Teglon:
         if self.options.healpix_file == "":
             is_error = True
             print("You must specify which healpix file to process.")
+
+        map_check = query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0]
+        if len(map_check) > 0:
+            is_error = True
+            print('''The combination of GWID `%s` and healpix file `%s` already exists in the db. Please choose a unique 
+combination''' % (self.options.gw_id, self.options.healpix_file))
 
         if is_error:
             print("Exiting...")
@@ -405,7 +413,6 @@ class Teglon:
         N128_dict = None
         map_pixel_dict = None
 
-        healpix_map_select = "SELECT id, NSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
         if not build_map:
             print("Skipping build map...")
             print("\tLoading existing map...")
@@ -543,6 +550,7 @@ class Teglon:
             # Unpack healpix file and insert map into db
             print("Unpacking '%s':%s..." % (self.options.gw_id, self.options.healpix_file))
             t1 = time.time()
+
             orig_prob, orig_distmu, orig_distsigma, orig_distnorm, header_gen = hp.read_map(hpx_path, field=(0, 1, 2, 3), h=True)
 
             header = dict(header_gen)
