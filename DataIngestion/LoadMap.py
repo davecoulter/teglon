@@ -365,7 +365,7 @@ class Teglon:
         parser.add_option('--healpix_file', default="", type="str", help='healpix filename.')
 
         parser.add_option('--orig_res', action="store_true", default=False,
-                          help='''Upload the healpix file at the native resolution (default is NSIDE = 128)''')
+                          help='''Upload the healpix file at the native resolution (default is NSIDE = 256)''')
 
         return (parser)
 
@@ -393,8 +393,8 @@ class Teglon:
             return 1
 
         ### Quantities that are required ###
-        nside128 = 256
-        # nside256 = 256
+        nside128 = 128
+        nside256 = 256
         prob = None
         distmu = None
         distsigma = None
@@ -416,14 +416,14 @@ class Teglon:
 
             orig_map_nside = hp.npix2nside(orig_npix)
 
-            # Check if NSIDE is > 128. If it is, and the --orig_res flag is not specified, rescale map to NSIDE 128
-            if orig_map_nside > nside128 and not self.options.orig_res:
-                print("Rescaling map to NSIDE = 128")
+            # Check if NSIDE is > 256. If it is, and the --orig_res flag is not specified, rescale map to NSIDE 256
+            if orig_map_nside > nside256 and not self.options.orig_res:
+                print("Rescaling map to NSIDE = 256")
                 rescaled_prob, rescaled_distmu, rescaled_distsigma, rescaled_distnorm = hp.ud_grade([orig_prob,
                                                                                                     orig_distmu,
                                                                                                     orig_distsigma,
                                                                                                     orig_distnorm],
-                                                                                                    nside_out=nside128,
+                                                                                                    nside_out=nside256,
                                                                                                     order_in="RING",
                                                                                                     order_out="RING")
                 rescaled_npix = len(rescaled_prob)
@@ -557,14 +557,14 @@ class Teglon:
             print("\tOriginal resolution (nside) of '%s': %s\n" % (self.options.healpix_file, orig_map_nside))
 
 
-            # Check if NSIDE is > 128. If it is, and the --orig_res flag is not specified, rescale map to NSIDE 128
-            if orig_map_nside > nside128 and not self.options.orig_res:
-                print("Rescaling map to NSIDE = 128")
+            # Check if NSIDE is > 256. If it is, and the --orig_res flag is not specified, rescale map to NSIDE 256
+            if orig_map_nside > nside256 and not self.options.orig_res:
+                print("Rescaling map to NSIDE = 256")
                 rescaled_prob, rescaled_distmu, rescaled_distsigma, rescaled_distnorm = hp.ud_grade([orig_prob,
                                                                                                     orig_distmu,
                                                                                                     orig_distsigma,
                                                                                                     orig_distnorm],
-                                                                                                    nside_out=nside128,
+                                                                                                    nside_out=nside256,
                                                                                                     order_in="RING",
                                                                                                     order_out="RING")
                 rescaled_npix = len(rescaled_prob)
@@ -679,7 +679,7 @@ class Teglon:
             norm[norm > max_double_value] = max_double_value
 
             theta, phi = hp.pix2ang(map_nside, range(len(prob)))
-            N128_indices = hp.ang2pix(128, theta, phi) # Change me
+            N128_indices = hp.ang2pix(nside128, theta, phi) # Change me
 
             healpix_pixel_data = []
             for i, n128_i in enumerate(N128_indices):
@@ -722,10 +722,10 @@ class Teglon:
 
             t1 = time.time()
             upload_sql = """LOAD DATA LOCAL INFILE '%s' 
-					INTO TABLE HealpixPixel 
-					FIELDS TERMINATED BY ',' 
-					LINES TERMINATED BY '\n' 
-					(HealpixMap_id, Pixel_Index, Prob, Distmu, Distsigma, Distnorm, Mean, Stddev, Norm, N128_SkyPixel_id);"""
+                    INTO TABLE HealpixPixel 
+                    FIELDS TERMINATED BY ',' 
+                    LINES TERMINATED BY '\n' 
+                    (HealpixMap_id, Pixel_Index, Prob, Distmu, Distsigma, Distnorm, Mean, Stddev, Norm, N128_SkyPixel_id);"""
 
             success = bulk_upload(upload_sql % upload_csv)
             if not success:
@@ -899,10 +899,10 @@ class Teglon:
             print("Bulk uploading Tile-Pixel...")
             t1 = time.time()
             st_hp_upload_sql = """LOAD DATA LOCAL INFILE '%s' 
-					INTO TABLE StaticTile_HealpixPixel 
-					FIELDS TERMINATED BY ',' 
-					LINES TERMINATED BY '\n' 
-					(StaticTile_id, HealpixPixel_id);"""
+                    INTO TABLE StaticTile_HealpixPixel 
+                    FIELDS TERMINATED BY ',' 
+                    LINES TERMINATED BY '\n' 
+                    (StaticTile_id, HealpixPixel_id);"""
 
             success = bulk_upload(st_hp_upload_sql % tile_pixel_upload_csv)
             if not success:
@@ -937,38 +937,38 @@ class Teglon:
             # 3. Store HealpixPixel_GalaxyDistance2 association
             t1 = time.time()
             galaxy_select = '''
-				SELECT 	id, 
-						Galaxy_id, 
-						Distance_id, 
-						PGC, 
-						Name_GWGC, 
-						Name_HyperLEDA, 
-						Name_2MASS, 
-						Name_SDSS_DR12, 
-						RA, 
-						_Dec, 
-						Coord, 
-						dist, 
-						dist_err, 
-						z_dist, 
-						z_dist_err, 
-						z, 
-						B, 
-						B_err, 
-						B_abs, 
-						J, 
-						J_err, 
-						H, 
-						H_err, 
-						K, 
-						K_err, 
-						flag1, 
-						flag2, 
-						flag3,
-						%s # injecting map NSIDE into result tuple
-				FROM GalaxyDistance2 
-				WHERE B IS NOT NULL AND z_dist IS NOT NULL AND z_dist < 1206.0 
-			'''
+                SELECT 	id, 
+                        Galaxy_id, 
+                        Distance_id, 
+                        PGC, 
+                        Name_GWGC, 
+                        Name_HyperLEDA, 
+                        Name_2MASS, 
+                        Name_SDSS_DR12, 
+                        RA, 
+                        _Dec, 
+                        Coord, 
+                        dist, 
+                        dist_err, 
+                        z_dist, 
+                        z_dist_err, 
+                        z, 
+                        B, 
+                        B_err, 
+                        B_abs, 
+                        J, 
+                        J_err, 
+                        H, 
+                        H_err, 
+                        K, 
+                        K_err, 
+                        flag1, 
+                        flag2, 
+                        flag3,
+                        %s # injecting map NSIDE into result tuple
+                FROM GalaxyDistance2 
+                WHERE B IS NOT NULL AND z_dist IS NOT NULL AND z_dist < 1206.0 
+            '''
             galaxy_result = query_db([galaxy_select % map_nside])[0]
             print("Number of Galaxies: %s" % len(galaxy_result))
             t2 = time.time()
@@ -1015,10 +1015,10 @@ class Teglon:
 
             t1 = time.time()
             upload_sql = """LOAD DATA LOCAL INFILE '%s' 
-					INTO TABLE HealpixPixel_GalaxyDistance2 
-					FIELDS TERMINATED BY ',' 
-					LINES TERMINATED BY '\n' 
-					(HealpixPixel_id, GalaxyDistance2_id);"""
+                    INTO TABLE HealpixPixel_GalaxyDistance2 
+                    FIELDS TERMINATED BY ',' 
+                    LINES TERMINATED BY '\n' 
+                    (HealpixPixel_id, GalaxyDistance2_id);"""
 
             success = bulk_upload(upload_sql % galaxy_pixel_upload_csv)
             if not success:
@@ -1067,37 +1067,37 @@ class Teglon:
             formatted_healpix_dir, self.options.gw_id)
 
             completeness_select = '''
-				SELECT 
-					sp1.id as N128_id, 0.5*(sd.D1+sd.D2) as Dist, sc.Completeness
-				FROM SkyPixel sp1 
-				JOIN SkyPixel sp2 on sp2.id = sp1.Parent_Pixel_id 
-				JOIN SkyPixel sp3 on sp3.id = sp2.Parent_Pixel_id 
-				JOIN SkyPixel sp4 on sp4.id = sp3.Parent_Pixel_id 
-				JOIN SkyPixel sp5 on sp5.id = sp4.Parent_Pixel_id 
-				JOIN SkyPixel sp6 on sp6.id = sp5.Parent_Pixel_id 
-				JOIN SkyPixel sp7 on sp7.id = sp6.Parent_Pixel_id 
-				JOIN SkyCompleteness sc on sc.SkyPixel_id in (sp1.id, sp2.id, sp3.id, sp4.id, sp5.id, sp6.id, sp7.id) 
-				JOIN SkyDistance sd on sd.id = sc.SkyDistance_id 
-				WHERE sp1.id in (%s)
-				ORDER BY sp1.id, sd.D1 
-			'''
+                SELECT 
+                    sp1.id as N128_id, 0.5*(sd.D1+sd.D2) as Dist, sc.Completeness
+                FROM SkyPixel sp1 
+                JOIN SkyPixel sp2 on sp2.id = sp1.Parent_Pixel_id 
+                JOIN SkyPixel sp3 on sp3.id = sp2.Parent_Pixel_id 
+                JOIN SkyPixel sp4 on sp4.id = sp3.Parent_Pixel_id 
+                JOIN SkyPixel sp5 on sp5.id = sp4.Parent_Pixel_id 
+                JOIN SkyPixel sp6 on sp6.id = sp5.Parent_Pixel_id 
+                JOIN SkyPixel sp7 on sp7.id = sp6.Parent_Pixel_id 
+                JOIN SkyCompleteness sc on sc.SkyPixel_id in (sp1.id, sp2.id, sp3.id, sp4.id, sp5.id, sp6.id, sp7.id) 
+                JOIN SkyDistance sd on sd.id = sc.SkyDistance_id 
+                WHERE sp1.id in (%s)
+                ORDER BY sp1.id, sd.D1 
+            '''
 
             healpix_pixel_completeness_select = '''
-				SELECT 
-					id, 
-					HealpixMap_id, 
-					Pixel_Index, 
-					Prob, 
-					Distmu, 
-					Distsigma, 
-					Distnorm, 
-					Mean, 
-					Stddev, 
-					Norm, 
-					N128_SkyPixel_id
-				FROM HealpixPixel hp
-				WHERE HealpixMap_id = %s and hp.N128_SkyPixel_id in (%s)
-			'''
+                SELECT 
+                    id, 
+                    HealpixMap_id, 
+                    Pixel_Index, 
+                    Prob, 
+                    Distmu, 
+                    Distsigma, 
+                    Distnorm, 
+                    Mean, 
+                    Stddev, 
+                    Norm, 
+                    N128_SkyPixel_id
+                FROM HealpixPixel hp
+                WHERE HealpixMap_id = %s and hp.N128_SkyPixel_id in (%s)
+            '''
 
             # get clusters of n128 by id
             # get completeness where n128 id in (above cluster)
@@ -1295,10 +1295,10 @@ class Teglon:
 
             t1 = time.time()
             upload_sql = """LOAD DATA LOCAL INFILE '%s' 
-					INTO TABLE HealpixPixel_Completeness 
-					FIELDS TERMINATED BY ',' 
-					LINES TERMINATED BY '\n' 
-					(HealpixPixel_id, PixelCompleteness, Renorm2DProb, NetPixelProb, HealpixMap_id);"""
+                    INTO TABLE HealpixPixel_Completeness 
+                    FIELDS TERMINATED BY ',' 
+                    LINES TERMINATED BY '\n' 
+                    (HealpixPixel_id, PixelCompleteness, Renorm2DProb, NetPixelProb, HealpixMap_id);"""
 
             success = bulk_upload(upload_sql % pixel_completeness_upload_csv)
             if not success:
@@ -1336,13 +1336,13 @@ class Teglon:
             t1 = time.time()
             # Set & Retrieve NetProbToGalaxies
             healpix_map_NetProbToGalaxies_update = '''
-				UPDATE HealpixMap hm
-				SET NetProbToGalaxies = (SELECT 1-SUM(hpc.Renorm2DProb) 
-										 FROM HealpixPixel_Completeness hpc 
-										 WHERE HealpixMap_id = %s
-										)
-				WHERE hm.id = %s;
-			'''
+                UPDATE HealpixMap hm
+                SET NetProbToGalaxies = (SELECT 1-SUM(hpc.Renorm2DProb) 
+                                         FROM HealpixPixel_Completeness hpc 
+                                         WHERE HealpixMap_id = %s
+                                        )
+                WHERE hm.id = %s;
+            '''
 
             query_db([healpix_map_NetProbToGalaxies_update % (healpix_map_id, healpix_map_id)], commit=True)
 
@@ -1359,33 +1359,33 @@ class Teglon:
             tt1 = time.time()
             # Get galaxy luminosity normalization
             lum_norm_select = '''
-				SELECT SUM(POW(gd2.z_dist, 2)*POW(10.0, -0.4*gd2.B)) FROM GalaxyDistance2 gd2 
-				WHERE gd2.id IN (SELECT DISTINCT _gd2.id FROM GalaxyDistance2 _gd2 
-								 JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = _gd2.id
-								 JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id WHERE hp.HealpixMap_id = %s)
-			'''
+                SELECT SUM(POW(gd2.z_dist, 2)*POW(10.0, -0.4*gd2.B)) FROM GalaxyDistance2 gd2 
+                WHERE gd2.id IN (SELECT DISTINCT _gd2.id FROM GalaxyDistance2 _gd2 
+                                 JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = _gd2.id
+                                 JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id WHERE hp.HealpixMap_id = %s)
+            '''
             lum_norm = query_db([lum_norm_select % healpix_map_id])[0][0][0]
 
             # Compute luminosity weight and pre-compute what we can on z_prob...
             precompute_select = '''
-				SELECT 
-					hp_gd2.id as HealpixPixel_GalaxyDistance2_id, 
-					hp.id, 
-					hp.Pixel_Index, 
-					hp.Prob, 
-					gd2.z_dist, 
-					gd2.z_dist_err, 
-					hp.Mean, 
-					hp.Stddev, 
-					POW(gd2.z_dist, 2)*POW(10.0, -0.4*(gd2.B))/%s as Bweight, 
-					ABS(gd2.z_dist - hp.Mean)/SQRT(POW(hp.Stddev, 2) + POW(gd2.z_dist_err, 2)) as SigmaTotal 
-				FROM GalaxyDistance2 gd2 
-				JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
-				JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
-				WHERE hp.HealpixMap_id = %s and gd2.id IN (SELECT DISTINCT _gd2.id FROM GalaxyDistance2 _gd2 
-								JOIN HealpixPixel_GalaxyDistance2 hp__gd2 on hp__gd2.GalaxyDistance2_id = _gd2.id
-								JOIN HealpixPixel _hp on _hp.id = hp__gd2.HealpixPixel_id WHERE _hp.HealpixMap_id = %s) 
-			'''
+                SELECT 
+                    hp_gd2.id as HealpixPixel_GalaxyDistance2_id, 
+                    hp.id, 
+                    hp.Pixel_Index, 
+                    hp.Prob, 
+                    gd2.z_dist, 
+                    gd2.z_dist_err, 
+                    hp.Mean, 
+                    hp.Stddev, 
+                    POW(gd2.z_dist, 2)*POW(10.0, -0.4*(gd2.B))/%s as Bweight, 
+                    ABS(gd2.z_dist - hp.Mean)/SQRT(POW(hp.Stddev, 2) + POW(gd2.z_dist_err, 2)) as SigmaTotal 
+                FROM GalaxyDistance2 gd2 
+                JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
+                JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
+                WHERE hp.HealpixMap_id = %s and gd2.id IN (SELECT DISTINCT _gd2.id FROM GalaxyDistance2 _gd2 
+                                JOIN HealpixPixel_GalaxyDistance2 hp__gd2 on hp__gd2.GalaxyDistance2_id = _gd2.id
+                                JOIN HealpixPixel _hp on _hp.id = hp__gd2.HealpixPixel_id WHERE _hp.HealpixMap_id = %s) 
+            '''
 
             precompute_result = query_db([precompute_select % (lum_norm, healpix_map_id, healpix_map_id)])[0]
             t2 = time.time()
@@ -1444,10 +1444,10 @@ class Teglon:
 
             t1 = time.time()
             upload_sql = """LOAD DATA LOCAL INFILE '%s' 
-					INTO TABLE HealpixPixel_GalaxyDistance2_Weight 
-					FIELDS TERMINATED BY ',' 
-					LINES TERMINATED BY '\n' 
-					(HealpixPixel_GalaxyDistance2_id, LumWeight, zWeight, Prob2DWeight, Norm4DWeight, GalaxyProb);"""
+                    INTO TABLE HealpixPixel_GalaxyDistance2_Weight 
+                    FIELDS TERMINATED BY ',' 
+                    LINES TERMINATED BY '\n' 
+                    (HealpixPixel_GalaxyDistance2_id, LumWeight, zWeight, Prob2DWeight, Norm4DWeight, GalaxyProb);"""
 
             success = bulk_upload(upload_sql % galaxy_attributes_upload_csv)
             if not success:
@@ -1482,21 +1482,21 @@ class Teglon:
             print("Updating healpix pixel net prob...")
             t1 = time.time()
             healpix_pixel_net_prob_update = '''
-				UPDATE HealpixPixel_Completeness hpc1 
-				JOIN 
-				( 
-					SELECT 
-						hpc2.id, 
-						(hpc2.Renorm2DProb + IFNULL(SUM(hp_gd2_w.GalaxyProb),0.0)) as NetPixelProb 
-					FROM HealpixPixel_Completeness hpc2 
-					LEFT JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.HealpixPixel_id = hpc2.HealpixPixel_id 
-					LEFT JOIN HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
-					WHERE hpc2.HealpixMap_id = %s
-					GROUP BY hpc2.id 
-				) temp on hpc1.id = temp.id 
-				SET hpc1.NetPixelProb = temp.NetPixelProb 
-				WHERE hpc1.HealpixMap_id = %s;
-			'''
+                UPDATE HealpixPixel_Completeness hpc1 
+                JOIN 
+                ( 
+                    SELECT 
+                        hpc2.id, 
+                        (hpc2.Renorm2DProb + IFNULL(SUM(hp_gd2_w.GalaxyProb),0.0)) as NetPixelProb 
+                    FROM HealpixPixel_Completeness hpc2 
+                    LEFT JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.HealpixPixel_id = hpc2.HealpixPixel_id 
+                    LEFT JOIN HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
+                    WHERE hpc2.HealpixMap_id = %s
+                    GROUP BY hpc2.id 
+                ) temp on hpc1.id = temp.id 
+                SET hpc1.NetPixelProb = temp.NetPixelProb 
+                WHERE hpc1.HealpixMap_id = %s;
+            '''
             query_db([healpix_pixel_net_prob_update % (healpix_map_id, healpix_map_id)], commit=True)
             t2 = time.time()
             print("\n********* start DEBUG ***********")
