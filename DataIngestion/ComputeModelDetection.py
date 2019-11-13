@@ -498,27 +498,27 @@ class Teglon:
 
         print("\nRetrieving distinct, imaged map pixels")
         map_pixel_select = '''
-			SELECT 
-				DISTINCT hp.id, 
-				hp.HealpixMap_id, 
-				hp.Pixel_Index, 
-				hp.Prob, 
-				hp.Distmu, 
-				hp.Distsigma, 
-				hp.Distnorm, 
-				hp.Mean, 
-				hp.Stddev, 
-				hp.Norm, 
-				sp.Pixel_Index as N128_Pixel_Index 
-			FROM 
-				HealpixPixel hp 
-			JOIN ObservedTile_HealpixPixel ot_hp on ot_hp.HealpixPixel_id = hp.id 
-			JOIN ObservedTile ot on ot.id = ot_hp.ObservedTile_id 
-			JOIN SkyPixel sp on sp.id = hp.N128_SkyPixel_id 
-			WHERE
-				ot.HealpixMap_id = %s and 
-				ot.Mag_Lim IS NOT NULL 
-		'''
+        SELECT 
+            DISTINCT hp.id, 
+            hp.HealpixMap_id, 
+            hp.Pixel_Index, 
+            hp.Prob, 
+            hp.Distmu, 
+            hp.Distsigma, 
+            hp.Distnorm, 
+            hp.Mean, 
+            hp.Stddev, 
+            hp.Norm, 
+            sp.Pixel_Index as N128_Pixel_Index 
+        FROM 
+            HealpixPixel hp 
+        JOIN ObservedTile_HealpixPixel ot_hp on ot_hp.HealpixPixel_id = hp.id 
+        JOIN ObservedTile ot on ot.id = ot_hp.ObservedTile_id 
+        JOIN SkyPixel sp on sp.id = hp.N128_SkyPixel_id 
+        WHERE
+            ot.HealpixMap_id = %s and 
+            ot.Mag_Lim IS NOT NULL 
+        '''
 
         q = map_pixel_select % healpix_map_id
         map_pixels = query_db([q])[0]
@@ -642,26 +642,26 @@ class Teglon:
 
         # Get and instantiate all observed tiles
         observed_tile_select = '''
-			SELECT 
-				id,
-				Detector_id, 
-				FieldName, 
-				RA, 
-				_Dec, 
-				EBV, 
-				N128_SkyPixel_id, 
-				Band_id, 
-				MJD, 
-				Exp_Time, 
-				Mag_Lim, 
-				HealpixMap_id 
-			FROM
-				ObservedTile 
-			WHERE
-				HealpixMap_id = %s and 
-				Detector_id = %s and 
-				Mag_Lim IS NOT NULL 
-		'''
+            SELECT 
+                id,
+                Detector_id, 
+                FieldName, 
+                RA, 
+                _Dec, 
+                EBV, 
+                N128_SkyPixel_id, 
+                Band_id, 
+                MJD, 
+                Exp_Time, 
+                Mag_Lim, 
+                HealpixMap_id 
+            FROM
+                ObservedTile 
+            WHERE
+                HealpixMap_id = %s and 
+                Detector_id = %s and 
+                Mag_Lim IS NOT NULL 
+        '''
 
         observed_tiles = []
 
@@ -978,15 +978,27 @@ class Teglon:
     # 	1.a Use this distance to perform time dilation
     # 2. Use the avg A_r from pixels
 
+        # parser.add_option('--gw_id', default="", type="str", help='LIGO superevent name, e.g. `S190425z`.')
+        #
+        # parser.add_option('--healpix_file', default="", type="str",
+        #                   help='Healpix filename. Used with `gw_id` to identify unique map.')
+        #
+        # parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",
+        #                   help='Directory for where to look for the healpix file.')
+        #
+        # parser.add_option('--model_dir', default="../Events/{GWID}/Models", type="str",
+        #                   help='Directory for where to look for the models to be processed.')
+
 
 if __name__ == "__main__":
-    useagestring = """python Generate_Tiles.py [options]
+    useagestring = """python ComputeModelDetection.py [options]
 
-Example with healpix_dir defaulted to 'Events/<gwid>':
-python LoadMap.py --gw_id <>gwid --healpix_file <filename>
+Example with healpix_dir defaulted to 'Events/<gwid>' amd model_dir to 'Events/{GWID}/Models':
+python ComputeModelDetection.py --gw_id <gwid> --healpix_file <filename>
 
-Example with healpix_dir specified:
-python LoadMap.py --gw_id <gwid> --healpix_dir Events/<directory name> --healpix_file <filename>
+Assumes .dat files with Astropy ECSV format: 
+https://docs.astropy.org/en/stable/api/astropy.io.ascii.Ecsv.html
+
 """
 
     start = time.time()
@@ -1001,5 +1013,5 @@ python LoadMap.py --gw_id <gwid> --healpix_dir Events/<directory name> --healpix
     end = time.time()
     duration = (end - start)
     print("\n********* start DEBUG ***********")
-    print("Teglon `LoadObservedTiles` execution time: %s" % duration)
+    print("Teglon `ComputeModelDetection` execution time: %s" % duration)
     print("********* end DEBUG ***********\n")
