@@ -687,7 +687,7 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
             norm[norm > max_double_value] = max_double_value
 
             theta, phi = hp.pix2ang(map_nside, range(len(prob)))
-            N128_indices = hp.ang2pix(nside128, theta, phi) # Change me
+            N128_indices = hp.ang2pix(nside128, theta, phi)
 
             healpix_pixel_data = []
             for i, n128_i in enumerate(N128_indices):
