@@ -381,8 +381,14 @@ class Teglon:
             print("GWID is required.")
 
         formatted_healpix_dir = self.options.healpix_dir
+        formatted_candidates_dir = self.options.healpix_dir + "/Candidates"
+        formatted_obs_tiles_dir = self.options.healpix_dir + "/ObservedTiles"
+        formatted_model_dir = self.options.healpix_dir + "/ModelDetection"
         if "{GWID}" in formatted_healpix_dir:
             formatted_healpix_dir = formatted_healpix_dir.replace("{GWID}", self.options.gw_id)
+            formatted_candidates_dir = formatted_candidates_dir.replace("{GWID}", self.options.gw_id)
+            formatted_obs_tiles_dir = formatted_obs_tiles_dir.replace("{GWID}", self.options.gw_id)
+            formatted_model_dir = formatted_model_dir.replace("{GWID}", self.options.gw_id)
 
         hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
 
@@ -466,6 +472,11 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
             try:
                 os.mkdir(formatted_healpix_dir)
                 print("\n\nDirectory ", formatted_healpix_dir, " Created ")
+
+                # Create the `ObservedTiles` and `Candidates` subdirectories
+                os.mkdir(formatted_candidates_dir)
+                os.mkdir(formatted_obs_tiles_dir)
+                os.mkdir(formatted_model_dir)
             except FileExistsError:
                 print("\n\nDirectory ", formatted_healpix_dir, " already exists")
 

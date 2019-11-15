@@ -357,8 +357,8 @@ class Teglon:
         parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",
                           help='Directory for where to look for the healpix file.')
 
-        parser.add_option('--model_dir', default="../Events/{GWID}/Models", type="str",
-                          help='Directory for where to look for the models to be processed.')
+        parser.add_option('--model_output_dir', default="../Events/{GWID}/ModelDetection", type="str",
+                          help='Directory for where to output processed models.')
 
         return (parser)
 
@@ -383,16 +383,17 @@ class Teglon:
         if "{GWID}" in formatted_healpix_dir:
             formatted_healpix_dir = formatted_healpix_dir.replace("{GWID}", self.options.gw_id)
 
-        formatted_model_dir = self.options.model_dir
-        if "{GWID}" in formatted_model_dir:
-            formatted_model_dir = formatted_model_dir.replace("{GWID}", self.options.gw_id)
+        formatted_model_output_dir = self.options.model_output_dir
+        if "{GWID}" in formatted_model_output_dir:
+            formatted_model_output_dir = formatted_model_output_dir.replace("{GWID}", self.options.gw_id)
 
         hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
+        model_path = "../Models"
 
         model_files = []
-        for file in os.listdir(formatted_model_dir):
+        for file in os.listdir(model_path):
             if file.endswith(".dat"):
-                model_files.append("%s/%s" % (formatted_model_dir, file))
+                model_files.append("%s/%s" % (model_path, file))
 
         if len(model_files) <= 0:
             is_error = True
@@ -903,7 +904,7 @@ class Teglon:
             result_table.add_row(
                 [model_param_tuple[0], model_param_tuple[1], model_param_tuple[2], model_param_tuple[3], prob])
 
-        result_table.write("%s/Detection_Results.prob" % formatted_model_dir, overwrite=True, format='ascii.ecsv')
+        result_table.write("%s/Detection_Results.prob" % formatted_model_output_dir, overwrite=True, format='ascii.ecsv')
 
     # # Just for fun: Pixel prob map
     # fig = plt.figure(figsize=(10,10), dpi=1000)
