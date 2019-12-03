@@ -410,8 +410,8 @@ def integrate_pixel(pixel_data):
 
     return (pix_key, prob_to_detect)
 
-def get_pix_models(pix_dict, all_models):
-
+# def get_pix_models(pix_dict, all_models):
+def get_pix_models(pix_dict, model_param_tuple, model_dict):
     reverse_band_mapping_new = {
         "SDSS g": "sdss_g",
         "SDSS r": "sdss_r",
@@ -421,36 +421,37 @@ def get_pix_models(pix_dict, all_models):
 
     for pix_index, pix_synopsis in pix_dict.items():
         for band in pix_synopsis.measured_bands:
-            for model_param_tuple, model_dict in all_models.items():
 
-                model_abs_mags = model_dict[reverse_band_mapping_new[band]]
-                rise = model_abs_mags[-1] - model_abs_mags[0]
-                run = pix_synopsis.model_observer_time_arr_new[model_param_tuple][-1] - \
-                      pix_synopsis.model_observer_time_arr_new[model_param_tuple][0]
-                slope = rise / run
-                intercept = model_abs_mags[0]
-                pixel_delta_mjd = pix_synopsis.delta_mjds[band]
+            # for model_param_tuple, model_dict in all_models.items():
 
-                dist_mod_arr = pix_synopsis.distance_modulus_arr
-                mwe = pix_synopsis.A_lambda[band]
-                prob_2D = pix_synopsis.prob_2D
-                distance_probs = pix_synopsis.distance_probs
+            model_abs_mags = model_dict[reverse_band_mapping_new[band]]
+            rise = model_abs_mags[-1] - model_abs_mags[0]
+            run = pix_synopsis.model_observer_time_arr_new[model_param_tuple][-1] - \
+                  pix_synopsis.model_observer_time_arr_new[model_param_tuple][0]
+            slope = rise / run
+            intercept = model_abs_mags[0]
+            pixel_delta_mjd = pix_synopsis.delta_mjds[band]
 
-                for i, (mjd, delta_mjd) in enumerate(pixel_delta_mjd.items()):
-                    dmjd = copy.deepcopy(delta_mjd)
-                    pix_key = (pix_index, model_param_tuple, band, mjd)
+            dist_mod_arr = pix_synopsis.distance_modulus_arr
+            mwe = pix_synopsis.A_lambda[band]
+            prob_2D = pix_synopsis.prob_2D
+            distance_probs = pix_synopsis.distance_probs
 
-                    return_tup = (pix_key,
-                           slope,
-                           intercept,
-                           dist_mod_arr,
-                           mwe,
-                           prob_2D,
-                           distance_probs,
-                           dmjd,
-                           pix_synopsis.lim_mags[band][mjd])
+            for i, (mjd, delta_mjd) in enumerate(pixel_delta_mjd.items()):
+                dmjd = copy.deepcopy(delta_mjd)
+                pix_key = (pix_index, model_param_tuple, band, mjd)
 
-                    yield copy.deepcopy(return_tup)
+                return_tup = (pix_key,
+                       slope,
+                       intercept,
+                       dist_mod_arr,
+                       mwe,
+                       prob_2D,
+                       distance_probs,
+                       dmjd,
+                       pix_synopsis.lim_mags[band][mjd])
+
+                yield copy.deepcopy(return_tup)
 
 class Teglon:
 
@@ -469,6 +470,9 @@ class Teglon:
 
         parser.add_option('--model_output_dir', default="../Events/{GWID}/ModelDetection", type="str",
                           help='Directory for where to output processed models.')
+
+        parser.add_option('--num_cpu', default="6", type="int",
+                          help='Number of CPUs to use for multiprocessing')
 
         return (parser)
 
@@ -917,43 +921,20 @@ class Teglon:
         # region Integrate
         compute_start = time.time()
         # NEW Do the calculation...
-        print("\nIntegrating total model probs...")
+        print("\nUpdating `map_pixel_dict_new`...")
         count = 0
 
         # pix_models = []
-        pool_int_count = 0
+        # pool_int_count = 0
         for pix_index, pix_synopsis in map_pixel_dict_new.items():
             for band in pix_synopsis.measured_bands:
                 for model_param_tuple, model_dict in models.items():
 
-                    # model_abs_mags = model_dict[reverse_band_mapping_new[band]]
-                    # rise = model_abs_mags[-1] - model_abs_mags[0]
-                    # run = pix_synopsis.model_observer_time_arr_new[model_param_tuple][-1] - \
-                    #       pix_synopsis.model_observer_time_arr_new[model_param_tuple][0]
-                    # slope = rise / run
-                    # intercept = model_abs_mags[0]
                     pixel_delta_mjd = pix_synopsis.delta_mjds[band]
-                    #
-                    # dist_mod_arr = pix_synopsis.distance_modulus_arr
-                    # mwe = pix_synopsis.A_lambda[band]
-                    # prob_2D = pix_synopsis.prob_2D
-                    # distance_probs = pix_synopsis.distance_probs
 
                     for i, (mjd, delta_mjd) in enumerate(pixel_delta_mjd.items()):
 
-                        pool_int_count += 1
-
-                        # dmjd = copy.deepcopy(delta_mjd)
-                        # pix_key = (pix_index, model_param_tuple, band, mjd)
-                        # pix_models.append((pix_key,
-                        #                    slope,
-                        #                    intercept,
-                        #                    dist_mod_arr,
-                        #                    mwe,
-                        #                    prob_2D,
-                        #                    distance_probs,
-                        #                    dmjd,
-                        #                    pix_synopsis.lim_mags[band][mjd]))
+                        # pool_int_count += 1
 
                         if model_param_tuple not in pix_synopsis.best_integrated_probs:
                             pix_synopsis.best_integrated_probs[model_param_tuple] = {}
@@ -976,11 +957,21 @@ class Teglon:
         # DEBUG
         # for p in pix_models:
         #     integrate_pixel(p)
+        integrated_pixels = []
+        model_count = len(models)
+        for model_index, (model_param_tuple, model_dict) in enumerate(models.items()):
 
-        pool = mp.Pool(processes=6, maxtasksperchild=100)
-        integrated_pixels = pool.imap_unordered(integrate_pixel,
-                                     tqdm(get_pix_models(map_pixel_dict_new, models), total=pool_int_count),
-                                     chunksize=1000)
+            t1 = time.time()
+            pool = mp.Pool(processes=6, maxtasksperchild=100)
+            integrated_pixels += pool.imap_unordered(integrate_pixel,
+                                         get_pix_models(map_pixel_dict_new, model_param_tuple, model_dict),
+                                         chunksize=1000)
+
+            pool.close()
+            pool.join()
+            del pool
+            t2 = time.time()
+            print("%s/%s complete: %0.5f [seconds]" % (model_index+1,model_count,(t2-t1)))
         # for _ in tqdm(pool.imap_unordered(integrate_pixel, get_pix_models(map_pixel_dict_new, models), chunksize=1000),
         #               total=pool_int_count):
         #     pass
