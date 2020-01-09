@@ -5,7 +5,6 @@ matplotlib.use("Agg")
 
 import os
 
-
 import itertools
 
 import matplotlib as mpl
@@ -91,6 +90,7 @@ from scipy import stats
 from astropy.table import Table
 import pdb
 import re
+
 # endregion
 
 # region Config Settings
@@ -114,6 +114,8 @@ config["data_dir"] = "./"
 # Generate all pixel indices
 cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
 GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
+
+
 # endregion
 
 # region DB CRUD
@@ -164,7 +166,7 @@ def query_db(query_list, commit=False):
                 size_in_mb = sys.getsizeof(streamed_results) / 1.0e+6
 
                 print("\tfetched: %s; current length: %s; running size: %0.3f MB" % (
-                count, len(streamed_results), size_in_mb))
+                    count, len(streamed_results), size_in_mb))
 
                 if not r or count < chunk_size:
                     break
@@ -341,10 +343,11 @@ def batch_insert(insert_statement, insert_data, batch_size=50000):
     print("\n********* start DEBUG ***********")
     print("batch_insert execution time: %s" % (_tend - _tstart))
     print("********* end DEBUG ***********\n")
+
+
 # endregion
 
 def initial_z(pixel_data):
-
     cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
 
     pix_index = pixel_data[0]
@@ -353,8 +356,8 @@ def initial_z(pixel_data):
     d = Distance(mean_dist, u.Mpc)
     z = d.compute_z(cosmology=cosmo)
 
-
     return (pix_index, z)
+
 
 def initial_integrate(pixel_data):
     pix_index = pixel_data[0]
@@ -364,6 +367,7 @@ def initial_integrate(pixel_data):
     n = float(quad(stats.norm(mean_dist, dist_sigma).pdf, 0.0, np.inf)[0])
     return (pix_index, n)
 
+
 def get_healpix_pixel_id(galaxy_info):
     phi, theta = np.radians(float(galaxy_info[8])), 0.5 * np.pi - np.radians(float(galaxy_info[9]))
 
@@ -371,10 +375,10 @@ def get_healpix_pixel_id(galaxy_info):
     # return the galaxy_id with the pixel index in the NSIDE of the healpix map
     return (galaxy_info[0], hp.ang2pix(int(galaxy_info[-1]), theta, phi))
 
+
 # @ray.remote
 # def integrate_pixel(pixel_data_list):
 def integrate_pixel(pixel_data):
-
     pix_key = pixel_data[0]
     slope = pixel_data[1]
     intercept = pixel_data[2]
@@ -391,27 +395,24 @@ def integrate_pixel(pixel_data):
     pix_abs_mag = slope * dmjd + intercept
 
     # compute distance upper bound, given the limiting magnitude:
-    pwr = (lim_mag - pix_abs_mag + 5.0 - mwe)/5.0 - 6.0
-    d_upper = 10**pwr
+    pwr = (lim_mag - pix_abs_mag + 5.0 - mwe) / 5.0 - 6.0
+    d_upper = 10 ** pwr
     prob_to_detect = 0.0
 
     if d_upper > 0.0:
-
-        distance_arr = np.linspace(0.0, 20*dist_sigma, 500)
-        dist_prob = 1.0 / np.sqrt(2.0 * np.pi * dist_sigma ** 2) * np.exp(-1.0 * (distance_arr - mean_dist) ** 2 / (2 * dist_sigma ** 2))
+        distance_arr = np.linspace(0.0, 20 * dist_sigma, 500)
+        dist_prob = 1.0 / np.sqrt(2.0 * np.pi * dist_sigma ** 2) * np.exp(
+            -1.0 * (distance_arr - mean_dist) ** 2 / (2 * dist_sigma ** 2))
         new_norm = trapz(dist_prob, distance_arr)
 
-        # print("d_upper: %s; dist_arr_max: %s" % (d_upper, np.max(distance_arr)))
         index_to_integrate_to = max(np.argwhere(distance_arr <= d_upper))[0]
         if index_to_integrate_to > 0:
             prob_to_detect = (prob_2D / new_norm) * trapz(dist_prob[0:index_to_integrate_to],
-                                                      distance_arr[0:index_to_integrate_to])
+                                                          distance_arr[0:index_to_integrate_to])
 
         # prob_to_detect = (prob_2D/forced_norm) * quad(stats.norm(mean_dist, dist_sigma).pdf, 0.0, d_upper)[0]
 
     return (pix_key, prob_to_detect)
-
-
 
     # compute the distribution in apparent mag
     # pix_app_mag = np.asarray(dist_mod_arr) + pix_abs_mag + mwe
@@ -467,6 +468,7 @@ def integrate_pixel(pixel_data):
 
     # return return_tups
 
+
 # # def get_pix_models(pix_dict, all_models):
 # # @ray.remote
 # def get_pix_model(pix_synopsis, band, mjd, delta_mjd, model_param_tuple, model_dict):
@@ -517,40 +519,22 @@ def integrate_pixel(pixel_data):
 #     return b
 
 def get_pix_models(pix_dict, all_models):
-    reverse_band_mapping_new = {
-        "SDSS g": "sdss_g",
-        "SDSS r": "sdss_r",
-        "SDSS i": "sdss_i",
-        "Clear": "Clear"
-    }
-
     for model_index, (model_param_tuple, model_dict) in enumerate(all_models.items()):
         for pix_index, pix_synopsis in pix_dict.items():
             for band in pix_synopsis.measured_bands:
 
-                model_abs_mags = model_dict[reverse_band_mapping_new[band]]
-                # rise = model_abs_mags[-1] - model_abs_mags[0]
-                # run = pix_synopsis.model_observer_time_arr_new[model_param_tuple][-1] - \
-                #       pix_synopsis.model_observer_time_arr_new[model_param_tuple][0]
-                # slope = rise / run
-                # intercept = model_abs_mags[0]
                 slope = model_param_tuple[1]
                 intercept = model_param_tuple[0]
                 pixel_delta_mjd = pix_synopsis.delta_mjds[band]
 
-                # dist_mod_arr = pix_synopsis.distance_modulus_arr
                 mwe = pix_synopsis.A_lambda[band]
                 prob_2D = pix_synopsis.prob_2D
                 mean_dist = pix_synopsis.mean_dist
                 dist_sigma = pix_synopsis.dist_sigma
                 forced_norm = pix_synopsis.forced_norm
-                # distance_probs = pix_synopsis.distance_probs
 
                 for i, (mjd, delta_mjd) in enumerate(pixel_delta_mjd.items()):
-                    # dmjd = copy.deepcopy(delta_mjd)
                     pix_key = (pix_index, model_param_tuple, band, mjd)
-
-                    # dist_mod_arr, distance_probs,
                     return_tup = (pix_key,
                                   slope,
                                   intercept,
@@ -563,6 +547,7 @@ def get_pix_models(pix_dict, all_models):
                                   pix_synopsis.lim_mags[band][mjd])
 
                     yield return_tup
+
 
 class Teglon:
 
@@ -584,6 +569,9 @@ class Teglon:
 
         parser.add_option('--num_cpu', default="6", type="int",
                           help='Number of CPUs to use for multiprocessing')
+
+        parser.add_option('--sub_dir', default="1", type="str",
+                          help='Linear Model sub directory (for batching)')
 
         return (parser)
 
@@ -619,10 +607,11 @@ class Teglon:
             formatted_model_output_dir = formatted_model_output_dir.replace("{GWID}", self.options.gw_id)
 
         hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
-        model_path = "../LinearModels"
+        model_path = "../LinearModels/%s" % self.options.sub_dir
 
         model_files = []
-        for file in os.listdir(model_path):
+        for file_index, file in enumerate(os.listdir(model_path)):
+
             if file.endswith(".dat"):
                 model_files.append("%s/%s" % (model_path, file))
 
@@ -667,7 +656,7 @@ class Teglon:
         }
         # endregion
 
-        # region Load Serialized Sky Pixels and EBV
+        # region Load Serialized Sky Pixels, EBV, and Models from Disk
         # LOADING NSIDE 128 SKY PIXELS AND EBV INFORMATION
         print("\nLoading NSIDE 128 pixels...")
         nside128 = 128
@@ -684,13 +673,13 @@ class Teglon:
         models = {}
         for index, mf in enumerate(model_files):
             model_table = Table.read(mf, format='ascii.ecsv')
-            mask = model_table['time'] > 0.0
+            # mask = model_table['time'] > 0.0
 
-            model_time = np.asarray(model_table['time'][mask])
-            g = np.asarray(model_table['sdss_g'][mask])
-            r = np.asarray(model_table['sdss_r'][mask])
-            i = np.asarray(model_table['sdss_i'][mask])
-            clear = np.asarray(model_table['Clear'][mask])
+            # model_time = np.asarray(model_table['time'][mask])
+            # g = np.asarray(model_table['sdss_g'][mask])
+            # r = np.asarray(model_table['sdss_r'][mask])
+            # i = np.asarray(model_table['sdss_i'][mask])
+            # clear = np.asarray(model_table['Clear'][mask])
 
             model_props = model_table.meta['comment']
             M = float(model_props[0].split("=")[1])
@@ -698,12 +687,19 @@ class Teglon:
 
             base_name = os.path.basename(mf)
             print("Loading `%s`" % base_name)
+            # models[(M, dM)] = {
+            #     'time': model_time,
+            #     'sdss_g': g,
+            #     'sdss_r': r,
+            #     'sdss_i': i,
+            #     'Clear': clear
+            # }
             models[(M, dM)] = {
-                'time': model_time,
-                'sdss_g': g,
-                'sdss_r': r,
-                'sdss_i': i,
-                'Clear': clear
+                'time': np.asarray([]),
+                'sdss_g': np.asarray([]),
+                'sdss_r': np.asarray([]),
+                'sdss_i': np.asarray([]),
+                'Clear': np.asarray([])
             }
         # endregion
 
@@ -760,12 +756,10 @@ class Teglon:
         # Initialize map pix dict for later access
         map_pixel_dict_new = OrderedDict()
 
-
         class Pixel_Synopsis():
-            def __init__(self, mean_dist, dist_sigma, prob_2D, pixel_index, N128_index, pix_ebv): # z
+            def __init__(self, mean_dist, dist_sigma, prob_2D, pixel_index, N128_index, pix_ebv):  # z
                 self.mean_dist = mean_dist
                 self.dist_sigma = dist_sigma
-                # self.forced_norm = quad(stats.norm(self.mean_dist, self.dist_sigma).pdf, 0.0, np.inf)[0]
                 self.forced_norm = 0.0
 
                 self.prob_2D = prob_2D
@@ -773,10 +767,6 @@ class Teglon:
                 self.N128_index = N128_index
                 self.pix_ebv = pix_ebv
                 self.z = 0.0
-
-                # self.distance_arr = None
-                # self.distance_modulus_arr = None
-                # self.distance_probs = None
 
                 # From the tiles that contain this pixel
                 # band:value
@@ -786,15 +776,6 @@ class Teglon:
 
                 # From the model (only select the bands that have been imaged)
                 self.A_lambda = OrderedDict()  # band:value
-
-                # model:arr
-                # self.model_observer_time_arr_new = OrderedDict()
-                # self.model_observer_time_arr_old = None
-
-                # Computed based on model + tile + pixel info
-                # band:value
-                # self.app_mag_model = {} # x-val
-                # self.app_mag_model_prob = {} # y-val
 
                 # Final calculation
                 # model:band:value
@@ -814,15 +795,11 @@ class Teglon:
             N128_pixel_index = int(p[10])
             pix_ebv = ebv[N128_pixel_index]
 
-            # d = Distance(mean_dist, u.Mpc)
             if mean_dist == 0.0:
                 # distance did not converge for this pixel. pass...
                 print("Bad Index: %s" % pixel_index)
                 count_bad_pixels += 1
                 continue
-
-            # z = d.compute_z(cosmology=cosmo)
-            # z = 0.0
 
             p_new = Pixel_Synopsis(
                 mean_dist,
@@ -831,25 +808,8 @@ class Teglon:
                 pixel_index,
                 N128_pixel_index,
                 pix_ebv)
-                # ,
-                # z)
 
             initial_integrands.append((p_new.pixel_index, p_new.mean_dist, p_new.dist_sigma))
-
-            # min_dist = mean_dist - 5.0 * dist_sigma
-            # if min_dist <= 0.0:
-            #     min_dist = 0.001
-            # max_dist = mean_dist + 5.0 * dist_sigma
-            #
-            # distance_arr = np.linspace(min_dist, max_dist, 100)
-            # distance_modulus_arr = 5.0 * np.log10(distance_arr * 1e+6) - 5.0
-            # distance_probs = 1.0 / np.sqrt(2.0 * np.pi * dist_sigma ** 2) * np.exp(
-            #     -1.0 * (distance_arr - mean_dist) ** 2 / (2 * dist_sigma ** 2))
-
-            # p_new.distance_arr = distance_arr
-            # p_new.distance_modulus_arr = distance_modulus_arr
-            # p_new.distance_probs = distance_probs
-
             map_pixel_dict_new[pixel_index] = p_new
 
         print("Starting z-cosmo pool (%s distances)..." % len(initial_integrands))
@@ -868,22 +828,21 @@ class Teglon:
 
         print("... finished z-cosmo pool: %s [seconds]" % (it2 - it1))
 
-        print("Starting intial integration pool (%s integrands)..." % len(initial_integrands))
-        it1 = time.time()
-        pool2 = mp.Pool(processes=self.options.num_cpu, maxtasksperchild=100)
-        forced_norms = pool2.imap_unordered(initial_integrate, initial_integrands, chunksize=1000)
-
-        pool2.close()
-        pool2.join()
-        del pool2
-
-        print("out of initial int")
-        for fn in forced_norms:
-            # print(fn)
-            map_pixel_dict_new[fn[0]].forced_norm = fn[1]
-        it2 = time.time()
-        print("... finished intial integration pool: %s [seconds]" % (it2-it1))
-
+        # print("Starting intial integration pool (%s integrands)..." % len(initial_integrands))
+        # it1 = time.time()
+        # pool2 = mp.Pool(processes=self.options.num_cpu, maxtasksperchild=100)
+        # forced_norms = pool2.imap_unordered(initial_integrate, initial_integrands, chunksize=1000)
+        #
+        # pool2.close()
+        # pool2.join()
+        # del pool2
+        #
+        # print("out of initial int")
+        # for fn in forced_norms:
+        #     # print(fn)
+        #     map_pixel_dict_new[fn[0]].forced_norm = fn[1]
+        # it2 = time.time()
+        # print("... finished intial integration pool: %s [seconds]" % (it2-it1))
 
         print("\nMap pixel dict complete. %s bad pixels." % count_bad_pixels)
         # endregion
@@ -1042,7 +1001,7 @@ class Teglon:
                     pix_synopsis_new.lim_mags[band_name] = {}
 
                 # time-dilate the delta_mjd, which is used to get the Abs Mag LC point
-                pix_synopsis_new.delta_mjds[band_name][t.mjd] = (t.mjd - GW190814_t_0)/(1.0 + pix_synopsis_new.z)
+                pix_synopsis_new.delta_mjds[band_name][t.mjd] = (t.mjd - GW190814_t_0) / (1.0 + pix_synopsis_new.z)
                 pix_synopsis_new.lim_mags[band_name][t.mjd] = (t.mag_lim)
 
         print("\nInitializing %s models..." % len(models))
@@ -1052,7 +1011,6 @@ class Teglon:
         # region Update pixel MWE and time-dilation
         # Set pixel `model_observer_time_arr` and `A_lambda`
         for pix_index, pix_synopsis in map_pixel_dict_new.items():
-
             for model_param_tuple, model_dict in models.items():
                 for model_col in model_dict.keys():
                     if model_col in band_mapping_new:
@@ -1067,9 +1025,6 @@ class Teglon:
                                 pix_a_lambda = pix_synopsis.pix_ebv * band_coeff
                                 pix_synopsis.A_lambda[band_name] = pix_a_lambda
 
-                # time_dilation = 1.0 + pix_synopsis.z
-                # pix_synopsis.model_observer_time_arr_new[model_param_tuple] = model_dict["time"] * time_dilation
-
         prep_end = time.time()
         print("Prep time: %s [seconds]" % (prep_end - prep_start))
         # endregion
@@ -1080,21 +1035,14 @@ class Teglon:
         print("\nUpdating `map_pixel_dict_new`...")
         count = 0
 
-        # pix_models = []
-        # pool_int_count = 0
         for pix_index, pix_synopsis in map_pixel_dict_new.items():
             for band in pix_synopsis.measured_bands:
                 for model_param_tuple, model_dict in models.items():
-
                     pixel_delta_mjd = pix_synopsis.delta_mjds[band]
 
                     for i, (mjd, delta_mjd) in enumerate(pixel_delta_mjd.items()):
-
-                        # pool_int_count += 1
-
                         if model_param_tuple not in pix_synopsis.best_integrated_probs:
                             pix_synopsis.best_integrated_probs[model_param_tuple] = {}
-
                         try:
                             pix_synopsis.best_integrated_probs[model_param_tuple][band][mjd] = 0.0
                         except:
@@ -1106,21 +1054,13 @@ class Teglon:
         compute_end = time.time()
         print("Compute time: %s [seconds]" % (compute_end - compute_start))
 
-
         print("Starting pool integrate...")
         pool_start = time.time()
 
         pool = mp.Pool(processes=self.options.num_cpu, maxtasksperchild=100)
         integrated_pixels = pool.imap_unordered(integrate_pixel,
-                                             get_pix_models(map_pixel_dict_new, models),
-                                             chunksize=1000)
-
-        # for p in get_pix_models(map_pixel_dict_new, models):
-        #     t = integrate_pixel(p)
-
-
-
-
+                                                get_pix_models(map_pixel_dict_new, models),
+                                                chunksize=1000)
 
         # integrated_pixels = []
         # model_count = len(models)
@@ -1138,8 +1078,6 @@ class Teglon:
         #
         #     t2 = time.time()
         #     print("%s/%s complete: %0.5f [seconds]" % (model_index+1,model_count,(t2-t1)))
-
-
 
         # model_count = len(models)
         # integrated_pixels = []
@@ -1174,9 +1112,6 @@ class Teglon:
         #
         #     print(batch_result)
 
-
-
-
         # for model_index, (model_param_tuple, model_dict) in enumerate(models.items()):
         #     # t1 = time.time()
         #
@@ -1202,10 +1137,10 @@ class Teglon:
         #                 int_pix_futures.append(pix_future)
         #                 # int_pix_futures.append(integrate_pixel.remote(pix_future))
 
-            # integrated_pixels += ray.get([ipf for ipf in int_pix_futures])
+        # integrated_pixels += ray.get([ipf for ipf in int_pix_futures])
 
-            # t2 = time.time()
-            # print("%s/%s complete: %0.5f [seconds]" % (model_index + 1, model_count, (t2 - t1)))
+        # t2 = time.time()
+        # print("%s/%s complete: %0.5f [seconds]" % (model_index + 1, model_count, (t2 - t1)))
 
         # integrated_pixels = ray.get(int_pix_futures)
 
@@ -1296,93 +1231,12 @@ class Teglon:
             print("\t%s" % prob)
             result_table.add_row([model_param_tuple[0], model_param_tuple[1], prob])
 
-        result_table.write("%s/Detection_Results_Linear.prob" % formatted_model_output_dir, overwrite=True, format='ascii.ecsv')
+        # result_table.write("%s/Detection_Results_Linear_%s.prob" % (formatted_model_output_dir, self.options.sub_dir),
+        #                    overwrite=True, format='ascii.ecsv')
+
+        result_table.write("%s/Detection_Results_Linear_to_GRB.prob" % formatted_model_output_dir,
+                           overwrite=True, format='ascii.ecsv')
         # endregion
-
-
-    # # Just for fun: Pixel prob map
-    # fig = plt.figure(figsize=(10,10), dpi=1000)
-    # ax = fig.add_subplot(111)
-
-    # m = Basemap(projection='stere',
-    # 		 lon_0=15.0,
-    # 		 lat_0=-20.0,
-    # 		 llcrnrlat=-35.0,
-    # 		 urcrnrlat=-18.0,
-    # 		 llcrnrlon=5.0,
-    # 		 urcrnrlon=30.0)
-
-    # log_lower_limit = 1e-8
-    # pixel_probs = []
-    # for p in pixels_to_plot:
-    # 	if p.prob >= log_lower_limit:
-    # 		pixel_probs.append(p.prob)
-    # 	else:
-    # 		pixel_probs.append(log_lower_limit)
-
-    # # pixel_probs = [p.prob for p in pixels_to_plot]
-    # min_prob = np.min(pixel_probs)
-    # max_prob = np.max(pixel_probs)
-
-    # print("min prob: %s" % min_prob)
-    # print("max prob: %s" % max_prob)
-
-    # # norm = colors.Normalize(min_prob, max_prob)
-    # norm = colors.LogNorm(min_prob, max_prob)
-    # print("Plotting (%s) `pixels`..." % len(pixels_to_plot))
-    # for i,p in enumerate(pixels_to_plot):
-    # 	p.plot(m, ax, facecolor=plt.cm.viridis(norm(pixel_probs[i])), edgecolor='None', linewidth=0.5, alpha=0.8)
-
-    # for i,p in enumerate(pixels_to_plot):
-    # 	p.plot(m, ax, facecolor='None', edgecolor='k', linewidth=0.25, alpha=1.0)
-
-    # # draw meridians
-    # meridians = np.arange(0.,360.,10.)
-    # par = m.drawmeridians(meridians,labels=[0,0,0,1],fontsize=18,zorder=-1,color='gray', linewidth=0.5)
-
-    # # draw parallels
-    # parallels = np.arange(-90.,90.,10.)
-    # par = m.drawparallels(parallels,labels=[0,1,0,0],fontsize=18,zorder=-1,color='gray', linewidth=0.5, xoffset=230000)
-
-    # sm = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.viridis)
-    # sm.set_array([]) # can be an empty list
-
-    # # tks = np.linspace(min_prob, max_prob, 11)
-    # tks = np.logspace(np.log10(min_prob), np.log10(max_prob), 11)
-    # tks_strings = []
-
-    # for t in tks:
-    # 	tks_strings.append('%0.3f' % (t*100))
-
-    # cb = fig.colorbar(sm, ax=ax, ticks=tks, orientation='horizontal', fraction=0.08951, pad=0.05, alpha=0.80)
-    # cb.ax.set_xticklabels(tks_strings, fontsize=14)
-    # cb.set_label("% per Pixel", fontsize=14, labelpad=10.0)
-    # cb.outline.set_linewidth(1.0)
-
-    # for axis in ['top','bottom','left','right']:
-    # 	ax.spines[axis].set_linewidth(2.0)
-
-    # ax.invert_xaxis()
-
-    # fig.savefig('CharlieTest2.png', bbox_inches='tight')
-    # plt.close('all')
-    # print("... Done.")
-
-    # Plot r-band light curve with limits by telescope
-    # 1. Use the avg distance from pixels
-    # 	1.a Use this distance to perform time dilation
-    # 2. Use the avg A_r from pixels
-
-        # parser.add_option('--gw_id', default="", type="str", help='LIGO superevent name, e.g. `S190425z`.')
-        #
-        # parser.add_option('--healpix_file', default="", type="str",
-        #                   help='Healpix filename. Used with `gw_id` to identify unique map.')
-        #
-        # parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",
-        #                   help='Directory for where to look for the healpix file.')
-        #
-        # parser.add_option('--model_dir', default="../Events/{GWID}/Models", type="str",
-        #                   help='Directory for where to look for the models to be processed.')
 
 
 if __name__ == "__main__":
