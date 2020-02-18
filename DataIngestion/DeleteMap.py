@@ -481,6 +481,11 @@ class Teglon:
             WHERE id = %s 
         '''
 
+        if is_error:
+            print("Exiting...")
+            return 1
+
+
         observed_tile_result = []
         healpix_pixel_result = []
         healpix_pixel_id_string = ""

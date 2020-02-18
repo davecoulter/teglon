@@ -362,10 +362,13 @@ class Teglon:
         parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",
                           help='Directory for where to look for the healpix file.')
 
-        parser.add_option('--healpix_file', default="", type="str", help='healpix filename.')
+        parser.add_option('--healpix_file', default="", type="str", help='healpix filename')
 
         parser.add_option('--orig_res', action="store_true", default=False,
                           help='''Upload the healpix file at the native resolution (default is NSIDE = 256)''')
+
+        parser.add_option('--load_local_file', action="store_true", default=False,
+                          help='''Circumvent downloading map and load map from disk''')
 
         return (parser)
 
@@ -480,40 +483,41 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
             except FileExistsError:
                 print("\n\nDirectory ", formatted_healpix_dir, " already exists")
 
-            # Get file -- ADD check and only get if you need to...
-            try:
-                print("Downloading `%s`..." % self.options.healpix_file)
-                t1 = time.time()
-                gw_file_formatter = "https://gracedb.ligo.org/apiweb/superevents/%s/files/%s"
-                gw_file = gw_file_formatter % (self.options.gw_id, self.options.healpix_file)
+            if not self.options.load_local_file:
+                # Get file -- ADD check and only get if you need to...
+                try:
+                    print("Downloading `%s`..." % self.options.healpix_file)
+                    t1 = time.time()
+                    gw_file_formatter = "https://gracedb.ligo.org/apiweb/superevents/%s/files/%s"
+                    gw_file = gw_file_formatter % (self.options.gw_id, self.options.healpix_file)
 
-                with urllib.request.urlopen(gw_file) as response:
-                    with open(hpx_path, 'wb') as out_file:
-                        shutil.copyfileobj(response, out_file)
-                t2 = time.time()
+                    with urllib.request.urlopen(gw_file) as response:
+                        with open(hpx_path, 'wb') as out_file:
+                            shutil.copyfileobj(response, out_file)
+                    t2 = time.time()
 
-                print("\n********* start DEBUG ***********")
-                print("Downloading `%s` - execution time: %s" % (self.options.healpix_file, (t2 - t1)))
-                print("********* end DEBUG ***********\n")
+                    print("\n********* start DEBUG ***********")
+                    print("Downloading `%s` - execution time: %s" % (self.options.healpix_file, (t2 - t1)))
+                    print("********* end DEBUG ***********\n")
 
-            except urllib.error.HTTPError as e:
-                print("\nError:")
-                print(e.code, gw_file)
-                print("\n\tExiting...")
-                return 1
-            except urllib.error.URLError as e:
-                print("\nError:")
-                if hasattr(e, 'reason'):
-                    print(e.reason, gw_file)
-                elif hasattr(e, 'code'):
+                except urllib.error.HTTPError as e:
+                    print("\nError:")
                     print(e.code, gw_file)
-                print("\n\tExiting...")
-                return 1
-            except Error as e:
-                print("\nError:")
-                print(e)
-                print("\n\tExiting...")
-                return 1
+                    print("\n\tExiting...")
+                    return 1
+                except urllib.error.URLError as e:
+                    print("\nError:")
+                    if hasattr(e, 'reason'):
+                        print(e.reason, gw_file)
+                    elif hasattr(e, 'code'):
+                        print(e.code, gw_file)
+                    print("\n\tExiting...")
+                    return 1
+                except Error as e:
+                    print("\nError:")
+                    print(e)
+                    print("\n\tExiting...")
+                    return 1
 
             # Get event details from GraceDB page
             try:
@@ -541,15 +545,15 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
 
             except urllib.error.HTTPError as e:
                 print("\nError:")
-                print(e.code, gw_file)
+                print(e.code, self.options.healpix_file)
                 print("\n\tExiting...")
                 return 1
             except urllib.error.URLError as e:
                 print("\nError:")
                 if hasattr(e, 'reason'):
-                    print(e.reason, gw_file)
+                    print(e.reason, self.options.healpix_file)
                 elif hasattr(e, 'code'):
-                    print(e.code, gw_file)
+                    print(e.code, self.options.healpix_file)
                 print("\n\tExiting...")
                 return 1
             except Error as e:
@@ -1087,7 +1091,7 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
 
             completeness_select = '''
                 SELECT 
-                    sp1.id as N128_id, 0.5*(sd.D1+sd.D2) as Dist, sc.Completeness
+                    sp1.id as N128_id, 0.5*(sd.D1+sd.D2) as Dist, sc.SmoothedCompleteness
                 FROM SkyPixel sp1 
                 JOIN SkyPixel sp2 on sp2.id = sp1.Parent_Pixel_id 
                 JOIN SkyPixel sp3 on sp3.id = sp2.Parent_Pixel_id 

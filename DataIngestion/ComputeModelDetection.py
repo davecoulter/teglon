@@ -904,7 +904,7 @@ class Teglon:
             result_table.add_row(
                 [model_param_tuple[0], model_param_tuple[1], model_param_tuple[2], model_param_tuple[3], prob])
 
-        result_table.write("%s/Detection_Results.prob" % formatted_model_output_dir, overwrite=True, format='ascii.ecsv')
+        result_table.write("%s/Detection_Results_Orig.prob" % formatted_model_output_dir, overwrite=True, format='ascii.ecsv')
 
     # # Just for fun: Pixel prob map
     # fig = plt.figure(figsize=(10,10), dpi=1000)

@@ -368,7 +368,11 @@ class Teglon:
             "r": "SDSS r",
             "i": "SDSS i",
             "Clear": "Clear",
-            "J": "UKIRT J"
+            "J": "UKIRT J",
+            "B":"Landolt B",
+            "V": "Landolt V",
+            "R": "Landolt R",
+            "I": "Landolt I"
         }
 
         detector_mapping = {
@@ -491,6 +495,9 @@ class Teglon:
             detectors[detector.name] = detector
         print("Processing `%s` for %s" % (tile_path, detector.name))
 
+
+
+
         # Iterate over lines of a tile
         with open(tile_path, 'r') as csvfile:
             # Read CSV lines
@@ -499,19 +506,33 @@ class Teglon:
 
                 file_name = row[0]
                 field_name = row[1]
+
+                # # ANDICAM format
+                # ra = row[2].strip()
+                # dec = row[3].strip()
+                # band = row[4].strip()
+
+                # STN data format
                 ra = float(row[2])
                 dec = float(row[3])
-                mjd = float(row[4])
-                band = row[5].strip()
+                exp_time = float(row[4])
+                mjd = float(row[5])
+                band = row[6].strip()
 
-                exp_time = None
-                try:
-                    exp_time = float(row[6])
-                    if exp_time <= 0.0:
-                        exp_time = None
-                except:
-                    pass
+                # # KAIT data format
+                # ra = float(row[2])
+                # dec = float(row[3])
+                # mjd = float(row[4])
+                # band = row[5].strip()
 
+                # exp_time = None
+                # try:
+                #     exp_time = float(row[6])
+                #     if exp_time <= 0.0:
+                #         exp_time = None
+                # except:
+                #     pass
+                #
                 mag_lim = None
                 try:
                     mag_lim = float(row[7])
@@ -526,7 +547,11 @@ class Teglon:
                 band_name = band_results[1]
                 band_F99 = float(band_results[2])
 
+                # STN + KAIT format
                 c = coord.SkyCoord(ra, dec, unit=(u.deg, u.deg))
+                # # ANDICAM format
+                # c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
+
                 n128_index = hp.ang2pix(nside128, 0.5 * np.pi - c.dec.radian, c.ra.radian)  # theta, phi
                 n128_id = N128_dict[n128_index]
 
@@ -630,8 +655,8 @@ class Teglon:
         # 				healpix_map_id))
 
         insert_observed_tile = '''
-			INSERT INTO 
-				ObservedTile (Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id) 
+			INSERT INTO
+				ObservedTile (Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id)
 			VALUES (%s, %s, %s, %s, ST_PointFromText(%s, 4326), ST_GEOMFROMTEXT(%s, 4326), %s, %s, %s, %s, %s, %s, %s)
 		'''
 
@@ -663,7 +688,8 @@ class Teglon:
                 t.id = ot_id
 
                 for p in t.enclosed_pixel_indices:
-                    tile_pixel_data.append((t.id, map_pixel_dict[p][0]))
+                    if p in map_pixel_dict: # Hack -- why is this ever NOT true?
+                        tile_pixel_data.append((t.id, map_pixel_dict[p][0]))
 
         print("Length of tile_pixel_data: %s" % len(tile_pixel_data))
 

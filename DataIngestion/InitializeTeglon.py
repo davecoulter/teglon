@@ -80,7 +80,8 @@ build_bands = False
 build_MWE = False
 build_galaxy_skypixel_associations = False
 build_completeness = False
-build_static_grids = True
+plot_completeness = True
+build_static_grids = False
 
 
 # Database SELECT
@@ -238,13 +239,16 @@ def batch_insert(insert_statement, insert_data, batch_size=50000):
     print("batch_insert execution time: %s" % (_tend - _tstart))
     print("********* end DEBUG ***********\n")
 
+print("Initializing database named: %s" % db_name)
+
 initialize_start = time.time()
 
 # Set up dustmaps config
 config["data_dir"] = "./"
 
 # Generate all pixel indices
-cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
+h = 0.7
+cosmo = LambdaCDM(H0=100 * h, Om0=0.27, Ode0=0.73)
 
 nside2 = 2
 nside2_npix = hp.nside2npix(nside2)
@@ -470,20 +474,41 @@ else:
         print("... Done.")
 
 ################################################
-swope_deg_width = 4096*0.435/3600. # pix * plate scale / arcsec/pix => degrees
+swope_deg_width = 4096*0.435/3600.
 swope_deg_height = 4112*0.435/3600.
+swope_max_dec = 30.0
+swope_min_dec = -90.0
 
 andicam_deg_width = 1024*0.371/3600.
 andicam_deg_height = 1024*0.371/3600.
+andicam_max_dec = 30.0
+andicam_min_dec = -90.0
 
 thacher_deg_width = 2048*0.609/3600.
 thacher_deg_height = 2048*0.609/3600.
+thacher_max_dec = 90.0
+thacher_min_dec = -30.0
 
 nickel_deg_width = 2048*0.368/3600.
 nickel_deg_height = 2048*0.368/3600.
+nickel_max_dec = 66.75
+nickel_min_dec = -30.0
 
-nickel_deg_width = 2048*0.368/3600.
-nickel_deg_height = 2048*0.368/3600.
+mosfire_deg_width = 0.1023333333
+mosfire_deg_height = 0.1023333333
+mosfire_max_dec = 90.0
+mosfire_min_dec = -70.0
+
+kait_deg_width = 0.1133333333
+kait_deg_height = 0.1133333333
+kait_max_dec = 90.0
+kait_min_dec = -30.0
+
+sinistro_deg_width = 0.4416666667
+sinistro_deg_height = 0.4416666667
+sinistro_max_dec = 90.0
+sinistro_min_dec = -90.0
+
 
 if not build_detectors:
     print("Skipping Detectors...")
@@ -492,10 +517,13 @@ else:
     print("\n\nBuilding Detectors...")
 
     detector_data = [
-        ("SWOPE", swope_deg_width, swope_deg_height, None, swope_deg_width*swope_deg_height, -90.0, 30.0),
-        ("ANDICAM", andicam_deg_width, andicam_deg_height, None, andicam_deg_width*andicam_deg_height, -90.0, 30.0),
-        ("THACHER", thacher_deg_width, thacher_deg_height, None, thacher_deg_width*thacher_deg_height, -30.0, 90.0),
-        ("NICKEL", nickel_deg_width, nickel_deg_height, None, nickel_deg_width*nickel_deg_height, -30.0, 90.0)
+        ("SWOPE", swope_deg_width, swope_deg_height, None, swope_deg_width*swope_deg_height, swope_min_dec, swope_max_dec),
+        ("ANDICAM", andicam_deg_width, andicam_deg_height, None, andicam_deg_width*andicam_deg_height, andicam_min_dec, andicam_max_dec),
+        ("THACHER", thacher_deg_width, thacher_deg_height, None, thacher_deg_width*thacher_deg_height, thacher_min_dec, thacher_max_dec),
+        ("NICKEL", nickel_deg_width, nickel_deg_height, None, nickel_deg_width*nickel_deg_height, nickel_min_dec, nickel_max_dec),
+        ("MOSFIRE", mosfire_deg_width, mosfire_deg_height, None, mosfire_deg_width * mosfire_deg_height, mosfire_min_dec, mosfire_max_dec),
+        ("KAIT", kait_deg_width, kait_deg_height, None, kait_deg_width * kait_deg_height, kait_min_dec, kait_max_dec),
+        ("SINISTRO", sinistro_deg_width, sinistro_deg_height, None, sinistro_deg_width * sinistro_deg_height, sinistro_min_dec, sinistro_max_dec)
     ]
 
     detector_insert = "INSERT INTO Detector (Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec) VALUES (%s, %s, %s, %s, %s, %s, %s);"
@@ -514,7 +542,6 @@ else:
     ## Build Band Objects ##
     print("\n\nBuilding Photometric Bands...")
     # Schlafly & Finkbeiner, 2018: https://arxiv.org/pdf/1012.4804.pdf
-
     # Name, Effective_Wavelength, F99 coefficient (Rv = 3.1); See Table 6.
     band_data = [
         ("SDSS u", 3586.8, 4.239),
@@ -522,17 +549,14 @@ else:
         ("SDSS r", 6165.1, 2.285),
         ("SDSS i", 7475.9, 1.698),
         ("SDSS z", 8922.9, 1.263),
-        # ("CTIO B", 4308.9, 3.641),
-        # ("CTIO V", 5516.6, 2.682),
-        # ("CTIO R", 6520.2, 2.119),
-        # ("CTIO I", 8006.9, 1.516),
         ("Landolt B", 4329.0,  3.626),
         ("Landolt V", 5421.7, 2.742),
         ("Landolt R", 6427.8,  2.169),
         ("Landolt I", 8048.4, 1.505),
         ("UKIRT J", 12482.9, 0.709),
         ("UKIRT H", 16588.4, 0.449),
-        ("UKIRT K", 21897.7, 0.302)
+        ("UKIRT K", 21897.7, 0.302),
+        ("Clear", 5618.41, 0.91)
     ]
 
     band_insert = "INSERT INTO Band (Name, Effective_Wavelength, F99_Coefficient) VALUES (%s, %s, %s);"
@@ -690,7 +714,10 @@ else:
 
         _tstart = time.time()
 
-        galaxy_association_data = batch_query(batch_queries)
+        galaxy_association_list_of_lists = batch_query(batch_queries)
+        galaxy_association_data = []
+        for galol in galaxy_association_list_of_lists:
+            galaxy_association_data += galol
         print("\n\n Batch INSERT (%s) records..." % len(galaxy_association_data))
         batch_insert(galaxy_association_insert, galaxy_association_data)
 
@@ -731,20 +758,22 @@ else:
         ORDER BY D1
     '''
 
-    sky_completeness_insert = "INSERT INTO SkyCompleteness (SkyPixel_id, SkyDistance_id, L10, Completeness) VALUES (%s, %s, %s, %s);"
+    sky_completeness_insert = '''
+        INSERT INTO SkyCompleteness (SkyPixel_id, SkyDistance_id, L10, Completeness, SmoothedCompleteness)  
+        VALUES (%s, %s, %s, %s, %s) 
+    '''
 
     tstart = time.time()
 
-    completeness_queries = {}
     sky_distance_queries = {}
+    completeness_queries = {}
     for nside, pixel_dict in sky_pixels.items():
 
-        # sky_distances = query_db([sky_distance_select % nside])
         sky_distance_queries[nside] = [sky_distance_select % nside]
         completeness_queries[nside] = []
 
-        for i, (pi,pe) in enumerate(pixel_dict.items()):
-            completeness_queries[nside].append(sky_completeness_select % (solar_B_abs, solar_B_abs, nside, pe.index)) #B_band_f99,
+        for i, (pi, pe) in enumerate(pixel_dict.items()):
+            completeness_queries[nside].append(sky_completeness_select % (solar_B_abs, solar_B_abs, nside, pe.index))
 
     sky_completeness_dict = OrderedDict()
     for i, (nside, pixel_dict) in enumerate(sky_pixels.items()):
@@ -757,7 +786,7 @@ else:
             sky_completeness_dict[pe.id] = OrderedDict()
 
             for sd in sky_distances:
-                sky_completeness_dict[pe.id][sd[0]]= [pe.id, sd[0], 0.0, 0.0]
+                sky_completeness_dict[pe.id][sd[0]] = [pe.id, sd[0], 0.0, 0.0, 0.0]
 
         # For non-null results, parse and load into dict
         for j, nside_result in enumerate(sky_completeness_per_nside_result):
@@ -770,7 +799,62 @@ else:
                 l10 = float(sc[4])
                 comp = float(sc[5])
 
-                sky_completeness_dict[pe_id][sd_id] = [pe_id, sd_id, l10, comp]
+                sky_completeness_dict[pe_id][sd_id] = [pe_id, sd_id, l10, comp, 0.0]
+
+    # HACK -- reconstruct the collections of pixels/completeness by distance slice so we can smooth...
+    smoothing_radius_Mpc = 30.0  # Mpc
+
+    distance_select = '''
+            SELECT id, D1, D2, NSIDE FROM SkyDistance 
+        '''
+    distance_result = query_db([distance_select])[0]
+    distance_result_dict = {int(dr[0]): dr for dr in distance_result}
+
+    pixel_select = '''
+        SELECT id, Pixel_Index, NSIDE FROM SkyPixel 
+    '''
+    pixel_result = query_db([pixel_select])[0]
+    pixel_result_dict = {int(pr[0]): pr for pr in pixel_result}
+
+    pixels_by_distance_key = {}
+    for pixel_id, distance_dict in sky_completeness_dict.items():
+        for dist_id, comp_record in distance_dict.items():
+
+            completeness = float(comp_record[3])
+
+            pix_record = pixel_result_dict[pixel_id]
+            p_index = int(pix_record[1])
+            p_nside = int(pix_record[2])
+
+            if dist_id not in pixels_by_distance_key:
+                pixels_by_distance_key[dist_id] = []
+
+            pixels_by_distance_key[dist_id].append(
+                Pixel_Element(p_index, p_nside, completeness, pixel_id=pixel_id)
+            )
+
+    for dist_id, pixels in pixels_by_distance_key.items():
+
+        # Sort pixels by their indices, and keep track of their database ID's in the same order
+        sorted_pix = sorted(pixels, key=lambda p: p.index)
+        pix_completenesses = [p.prob for p in sorted_pix]
+        pix_ids = [p.id for p in sorted_pix]
+
+        dist_record = distance_result_dict[dist_id]
+        d1 = float(dist_record[1])
+        d2 = float(dist_record[2])
+        avg_dist = (d1 + d2)/2.
+
+        z = z_at_value(cosmo.luminosity_distance, avg_dist * u.Mpc)
+        mpc_radian = cosmo.angular_diameter_distance(z)  # Mpc/radian
+        radian_radius = smoothing_radius_Mpc / mpc_radian.value
+
+        smoothed_completeness = hp.sphtfunc.smoothing(pix_completenesses, fwhm=radian_radius, iter=1)
+
+        # Update the record with the smoothed value...
+        for i, smooth_pix_comp in enumerate(smoothed_completeness):
+            pix_id = pix_ids[i]
+            sky_completeness_dict[pix_id][dist_id][4] = smooth_pix_comp
 
     # Flatten results for INSERT
     completeness_data = []
@@ -778,193 +862,160 @@ else:
         for dist_id, values in inner_dict.items():
 
             # Multi-inserts require tuples
-            v = (values[0], values[1], values[2], values[3])
+            v = (values[0], values[1], values[2], values[3], values[4])
             completeness_data.append(v)
-
 
     print("\nInserting %s sky completenesses..." % (len(completeness_data)))
     print("\n\n")
     print(completeness_data)
     batch_insert(sky_completeness_insert, completeness_data)
 
-    if isDEBUG:
-
-        def plot_completeness(d1, d2, pixels, pixel_outline, file_name):
-            lon0=180.0
-            fig = plt.figure(figsize=(8,8), dpi=180)
-            ax = fig.add_subplot(111)
-            m = Basemap(projection='moll',lon_0=lon0)
-
-            norm = colors.Normalize(0.0, 1.0)
-
-            values = []
-            for p in pixels:
-                pprob = p.prob
-                if p.prob <= 0.0:
-                    pprob = 0.0
-                elif p.prob > 1.0:
-                    pprob = 1.0
-
-                values.append(pprob)
-
-            for i,p in enumerate(pixels):
-                p.plot(m, ax, facecolor=plt.cm.viridis(values[i]), edgecolor='None', linewidth=0.5, alpha=0.8, zorder=9900)
-
-
-            for p in pixel_outline:
-                p.plot(m, ax, facecolor='None', edgecolor='k', linewidth=0.5)
-
-            meridians = np.arange(0.,360.,60.)
-            m.drawparallels(np.arange(-90.,91.,30.),fontsize=14,labels=[True,True,False,False],dashes=[2,2],linewidth=0.5, xoffset=2500000)
-            m.drawmeridians(meridians,labels=[False,False,False,False],dashes=[2,2],linewidth=0.5)
-
-            for mer in meridians[1:]:
-                plt.annotate("%0.0f" % mer,xy=m(mer,0),xycoords='data', fontsize=14, zorder=9999)
-
-            sm = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.viridis)
-            sm.set_array([]) # can be an empty list
-
-            tks = np.linspace(0.0, 1.0, 11)
-            tks_strings = []
-
-            for t in tks:
-                tks_strings.append('%0.0f' % (t*100))
-
-            top_left = 1.05
-            delta_y = 0.04
-            ax.annotate('[%0.0f - %0.0f] Mpc' % (d1,d2), xy=(0.5, top_left), xycoords='axes fraction', fontsize=16, ha='center')
-
-            cb = fig.colorbar(sm, ax=ax, ticks=tks, orientation='horizontal', fraction=0.08951, pad=0.02, alpha=0.80)
-            cb.ax.set_xticklabels(tks_strings, fontsize=14)
-            cb.set_label("% Complete per Pixel", fontsize=14, labelpad=10.0)
-            cb.outline.set_linewidth(1.0)
-
-            for axis in ['top','bottom','left','right']:
-                ax.spines[axis].set_linewidth(2.0)
-
-            ax.invert_xaxis()
-
-            fig.savefig(file_name, bbox_inches='tight') #,dpi=840
-            plt.close('all')
-
-            print("... %s Done." % file_name)
-
-        sky_distance_select_2 = '''
-            SELECT 
-                id, 
-                D1, 
-                D2, 
-                dCoV, 
-                Sch_L10, 
-                NSIDE 
-            FROM SkyDistance 
-            ORDER BY D1;
-        '''
-
-        select_completeness = '''
-            SELECT sc.id, sc.SkyPixel_id, sc.SkyDistance_id, sp.Pixel_Index, sd.D1, sd.D2, sc.Completeness, sp.NSIDE
-            FROM SkyCompleteness sc 
-            JOIN SkyPixel sp on sp.id = sc.SkyPixel_id
-            JOIN SkyDistance sd on sd.id = sc.SkyDistance_id
-            WHERE sd.id = %s
-            ORDER BY sd.D1, sp.Pixel_Index;
-        '''
-
-        file_base_name = 'CompletenessPlots/sky_completeness_%s.png'
-        # file_base_name = 'SmoothedCompletenessPlots/sky_completeness_%s.png'
-
-
-        print("\nGetting Sky Distances ...")
-        sky_dist = query_db([sky_distance_select_2])[0]
-        print("... retrieved %s " % len(sky_dist))
-
-
-        print("Getting Sky Completenesses ...")
-        comp_pix = OrderedDict()
-        for i, d in enumerate(sky_dist):
-
-            dist_id = int(d[0])
-            print("\tProcessing dist id: %s" % dist_id)
-
-            comp_pix[dist_id] = []
-            completenesses = query_db([select_completeness % d[0]])[0]
-            print("\tretrieved %s completenesses... building pixels" % len(completenesses))
-
-            for c in completenesses:
-                pixel_index = int(c[3])
-                pixel_nside = int(c[7])
-                completeness = float(c[6])
-                comp_pix[dist_id].append(Pixel_Element(pixel_index, pixel_nside, completeness))
-
-        print("\nPlotting Sky Completenesses ...")
-        this_nside = nside2
-        j = 0
-        for i, d in enumerate(sky_dist):
-            fname = file_base_name % str(j).zfill(3)
-            dist_id = int(d[0])
-
-            # # Testing smoothing...
-            # dist_nside = int(d[5])
-            # index_of_nside = nsides.index(dist_nside)
-            # frac_of_nside = frac[index_of_nside]
-            # steradian_per_pixel = frac_of_nside*4*np.pi
-            # radius = np.sqrt(9*steradian_per_pixel/np.pi)
-
-            # original_pix = comp_pix[dist_id]
-            # original_prob = []
-            # for p in original_pix:
-            # 	original_prob.append(p.prob)
-
-            # smoothed_prob = hp.sphtfunc.smoothing(original_prob, fwhm=radius, iter = 1)
-            # smoothed_pix = []
-            # for k, p in enumerate(smoothed_prob):
-            # 	smoothed_pix.append(Pixel_Element(k, dist_nside, p))
-
-            d1 = float(d[1])
-            d2 = float(d[2])
-            pix = comp_pix[dist_id]
-
-            print("Plot [%0.2f to %0.2f] ..." % (d1, d2))
-
-            plot_completeness(d1, d2, pix, pix, fname)
-
-            # # Testing smoothing...
-            # plot_completeness(d1, d2, smoothed_pix, smoothed_pix, fname)
-
-            next_nside = int(sky_dist[i+1][5])
-            if (i+1) < len(sky_dist) and next_nside > this_nside:
-                j += 1
-                fname = file_base_name % str(j).zfill(3)
-                this_nside = next_nside
-
-                # # Testing smoothing...
-                # index_of_nside2 = nsides.index(next_nside)
-                # frac_of_nside2 = frac[index_of_nside2]
-                # steradian_per_pixel2 = frac_of_nside2*4*np.pi
-                # radius2 = np.sqrt(9*steradian_per_pixel2/np.pi)
-
-                # original_pix2 = comp_pix[(dist_id+1)]
-                # original_prob2 = []
-                # for p in original_pix2:
-                # 	original_prob2.append(p.prob)
-
-                # smoothed_prob2 = hp.sphtfunc.smoothing(original_prob2, fwhm=radius, iter = 1)
-                # smoothed_pix2 = []
-                # for k, p in enumerate(smoothed_prob2):
-                # 	smoothed_pix2.append(Pixel_Element(k, next_nside, p))
-
-                plot_completeness(d1, d2, pix, comp_pix[(dist_id+1)], fname)
-                # plot_completeness(d1, d2, smoothed_pix, smoothed_pix2, fname)
-
-            j += 1
-
-        print("\n... Plots complete")
-
-
     tend = time.time()
     print("\n********* start DEBUG ***********")
     print("Process Completeness Finished - execution time: %s" % (tend - tstart))
     print("********* end DEBUG ***********\n")
+
+if plot_completeness:
+    def plot_completeness(d1, d2, pixels, pixel_outline, file_name):
+        lon0=180.0
+        fig = plt.figure(figsize=(8,8), dpi=180)
+        ax = fig.add_subplot(111)
+        m = Basemap(projection='moll',lon_0=lon0)
+
+        norm = colors.Normalize(0.0, 1.0)
+
+        values = []
+        for p in pixels:
+            pprob = p.prob
+            if p.prob <= 0.0:
+                pprob = 0.0
+            elif p.prob > 1.0:
+                pprob = 1.0
+
+            values.append(pprob)
+
+        for i,p in enumerate(pixels):
+            p.plot(m, ax, facecolor=plt.cm.viridis(values[i]), edgecolor='None', linewidth=0.5, alpha=0.8, zorder=9900)
+
+
+        for p in pixel_outline:
+            p.plot(m, ax, facecolor='None', edgecolor='k', linewidth=0.5)
+
+        meridians = np.arange(0.,360.,60.)
+        m.drawparallels(np.arange(-90.,91.,30.),fontsize=14,labels=[True,True,False,False],dashes=[2,2],linewidth=0.5, xoffset=2500000)
+        m.drawmeridians(meridians,labels=[False,False,False,False],dashes=[2,2],linewidth=0.5)
+
+        for mer in meridians[1:]:
+            plt.annotate("%0.0f" % mer,xy=m(mer,0),xycoords='data', fontsize=14, zorder=9999)
+
+        sm = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.viridis)
+        sm.set_array([]) # can be an empty list
+
+        tks = np.linspace(0.0, 1.0, 11)
+        tks_strings = []
+
+        for t in tks:
+            tks_strings.append('%0.0f' % (t*100))
+
+        top_left = 1.05
+        delta_y = 0.04
+        ax.annotate('[%0.0f - %0.0f] Mpc' % (d1,d2), xy=(0.5, top_left), xycoords='axes fraction', fontsize=16, ha='center')
+
+        cb = fig.colorbar(sm, ax=ax, ticks=tks, orientation='horizontal', fraction=0.08951, pad=0.02, alpha=0.80)
+        cb.ax.set_xticklabels(tks_strings, fontsize=14)
+        cb.set_label("% Complete per Pixel", fontsize=14, labelpad=10.0)
+        cb.outline.set_linewidth(1.0)
+
+        for axis in ['top','bottom','left','right']:
+            ax.spines[axis].set_linewidth(2.0)
+
+        ax.invert_xaxis()
+
+        fig.savefig(file_name, bbox_inches='tight') #,dpi=840
+        plt.close('all')
+
+        print("... %s Done." % file_name)
+
+    sky_distance_select_2 = '''
+        SELECT 
+            id, 
+            D1, 
+            D2, 
+            dCoV, 
+            Sch_L10, 
+            NSIDE 
+        FROM SkyDistance 
+        ORDER BY D1;
+    '''
+
+    select_completeness = '''
+        SELECT 
+            sc.id, 
+            sc.SkyPixel_id, 
+            sc.SkyDistance_id, 
+            sp.Pixel_Index, 
+            sd.D1, 
+            sd.D2, 
+            sc.Completeness, 
+            sc.SmoothedCompleteness, 
+            sp.NSIDE 
+        FROM SkyCompleteness sc 
+        JOIN SkyPixel sp on sp.id = sc.SkyPixel_id 
+        JOIN SkyDistance sd on sd.id = sc.SkyDistance_id 
+        WHERE sd.id = %s 
+        ORDER BY sd.D1, sp.Pixel_Index; 
+    '''
+
+    # file_base_name = 'CompletenessPlots/sky_completeness_%s.png'
+    file_base_name = 'SmoothedCompletenessPlots/sky_completeness_%s.png'
+
+    print("\nGetting Sky Distances ...")
+    sky_dist = query_db([sky_distance_select_2])[0]
+    print("... retrieved %s " % len(sky_dist))
+
+    print("Getting Sky Completenesses ...")
+    comp_pix = OrderedDict()
+    for i, d in enumerate(sky_dist):
+
+        dist_id = int(d[0])
+        print("\tProcessing dist id: %s" % dist_id)
+
+        comp_pix[dist_id] = []
+        completenesses = query_db([select_completeness % d[0]])[0]
+        print("\tretrieved %s completenesses... building pixels" % len(completenesses))
+
+        for c in completenesses:
+            pixel_index = int(c[3])
+            smoothed_completeness = float(c[7])
+            pixel_nside = int(c[8])
+            comp_pix[dist_id].append(Pixel_Element(pixel_index, pixel_nside, smoothed_completeness))
+
+    print("\nPlotting Sky Completenesses ...")
+    this_nside = nside2
+    j = 0
+    for i, d in enumerate(sky_dist):
+
+        fname = file_base_name % str(j).zfill(3)
+        dist_id = int(d[0])
+
+        d1 = float(d[1])
+        d2 = float(d[2])
+        pix = comp_pix[dist_id]
+
+        print("Plot [%0.2f to %0.2f] ..." % (d1, d2))
+
+        plot_completeness(d1, d2, pix, pix, fname)
+
+        next_nside = int(sky_dist[i+1][5])
+        if (i+1) < len(sky_dist) and next_nside > this_nside:
+            j += 1
+            fname = file_base_name % str(j).zfill(3)
+            this_nside = next_nside
+            plot_completeness(d1, d2, pix, comp_pix[(dist_id+1)], fname)
+
+        j += 1
+
+    print("\n... Plots complete")
 
 ################################################
 

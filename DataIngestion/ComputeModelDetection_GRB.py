@@ -115,8 +115,8 @@ config["data_dir"] = "./"
 
 # Generate all pixel indices
 cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
-GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
-
+# GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
+GW190814_t_0 = 58598.346134259256  # time of GW190425 merger
 
 # endregion
 
@@ -363,6 +363,13 @@ def initial_z(pixel_data):
 
 def integrate_pixel(pixel_data):
 
+    reverse_band_mapping_new = {
+        "SDSS g": "sdss_g",
+        "SDSS r": "sdss_r",
+        "SDSS i": "sdss_i",
+        "Clear": "Clear"
+    }
+
     pix_key = pixel_data[0]
     pix_index = pix_key[0]
     model_key = pix_key[1]
@@ -374,7 +381,11 @@ def integrate_pixel(pixel_data):
     band = pixel_data[5]
     mjd = pixel_data[6]
     lim_mag = pixel_data[7]
-    abs_in_band = pixel_data[8]
+    model_func_dict = pixel_data[8]
+    delta_mjd = pixel_data[9]
+
+    f_band = model_func_dict[reverse_band_mapping_new[band]]
+    abs_in_band = f_band(delta_mjd)
 
     # compute distance upper bound, given the limiting magnitude:
     pwr = (lim_mag - abs_in_band + 5.0 - mwe) / 5.0 - 6.0
@@ -524,7 +535,8 @@ class Teglon:
             g = np.asarray(model_table['sdss_g'][mask])
             r = np.asarray(model_table['sdss_r'][mask])
             i = np.asarray(model_table['sdss_i'][mask])
-            clear = np.asarray(model_table['Clear'][mask])
+            # clear = np.asarray(model_table['Clear'][mask])
+            clear = np.asarray(model_table['sdss_r'][mask])
 
             model_props = model_table.meta['comment']
             model_type = model_props[0].split("=")[1]
@@ -543,10 +555,10 @@ class Teglon:
             print("Loading `%s`" % base_name)
 
             # Get interpolation function for each Light Curve
-            f_g = interp1d(model_time, g)
-            f_r = interp1d(model_time, r)
-            f_i = interp1d(model_time, i)
-            f_clear = interp1d(model_time, clear)
+            f_g = interp1d(model_time, g, fill_value="extrapolate")
+            f_r = interp1d(model_time, r, fill_value="extrapolate")
+            f_i = interp1d(model_time, i, fill_value="extrapolate")
+            f_clear = interp1d(model_time, clear, fill_value="extrapolate")
 
             models[(E, n, theta_obs)] = {
                 'sdss_g': f_g,
@@ -899,45 +911,62 @@ class Teglon:
         compute_end = time.time()
         print("Update `map_pixel_dict_new` time: %s [seconds]" % (compute_end - compute_start))
 
+
+
+        # with open('%s/%s_models.pkl' % (formatted_model_output_dir, self.options.gw_id), 'wb') as handle:
+        #     pickle.dump(models, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        #
+        # with open('%s/%s_map_pixel_dict_new.pkl' % (formatted_model_output_dir, self.options.gw_id), 'wb') as handle:
+        #     pickle.dump(map_pixel_dict_new, handle, protocol=pickle.HIGHEST_PROTOCOL)
+        #
+        #
+        # raise Exception("Stop")
+        #
+        # models = None
+        # map_pixel_dict_new = None
+        # with open('%s/%s_models.pkl' % (formatted_model_output_dir, self.options.gw_id), 'rb') as handle:
+        #     models = pickle.load(handle)
+        #
+        # with open('%s/%s_map_pixel_dict_new.pkl' % (formatted_model_output_dir, self.options.gw_id), 'rb') as handle:
+        #     map_pixel_dict_new = pickle.load(handle)
+
+
         # Compose integrands
+        print("Building integrands...")
         integrands_start = time.time()
         pixels_to_integrate = []
         for model_key, model_func_dict in models.items():
             for pix_index, pix_synopsis in map_pixel_dict_new.items():
                 for band in pix_synopsis.measured_bands:
-
                     mwe = pix_synopsis.A_lambda[band]
                     prob_2D = pix_synopsis.prob_2D
                     mean_dist = pix_synopsis.mean_dist
                     dist_sigma = pix_synopsis.dist_sigma
 
                     for i, (mjd, delta_mjd) in enumerate(pix_synopsis.delta_mjds[band].items()):
-
-                        f_band = model_func_dict[reverse_band_mapping_new[band]]
-                        abs_in_band = f_band(delta_mjd)
                         pix_key = (pix_index, model_key)
-                        return_tup = (pix_key,
-                                      mean_dist,
-                                      dist_sigma,
-                                      mwe,
-                                      prob_2D,
-                                      band,
-                                      mjd,
-                                      pix_synopsis.lim_mags[band][mjd],
-                                      abs_in_band)
-                        pixels_to_integrate.append(return_tup)
-
-        print("Total integrands: %s" % len(pixels_to_integrate))
+                        pixels_to_integrate.append((
+                                pix_key,
+                                mean_dist,
+                                dist_sigma,
+                                mwe,
+                                prob_2D,
+                                band,
+                                mjd,
+                                pix_synopsis.lim_mags[band][mjd],
+                                model_func_dict,
+                                delta_mjd
+                        ))
         integrands_end = time.time()
         print("Building integrands time: %s [seconds]" % (integrands_end - integrands_start))
 
+        print("Integrating...")
         mp_start = time.time()
-        pool = mp.Pool(processes=self.options.num_cpu, maxtasksperchild=100)
-        integrated_pixels = pool.imap_unordered(integrate_pixel,
-                                                pixels_to_integrate,
-                                                chunksize=1000)
+        pool3 = mp.Pool(processes=self.options.num_cpu, maxtasksperchild=500)
+        integrated_pixels = pool3.imap_unordered(integrate_pixel,
+                                                 pixels_to_integrate,
+                                                 chunksize=5000)
 
-        # for ip in ips_flat:
         for ip in integrated_pixels:
             pix_key = ip[0]
             pix_index = pix_key[0]
@@ -945,10 +974,12 @@ class Teglon:
             band = pix_key[2]
             mjd = pix_key[3]
             prob = ip[1]
-
             map_pixel_dict_new[pix_index].best_integrated_probs[model_param_tuple][band][mjd] = prob
-
         mp_end = time.time()
+
+        pool3.close()
+        pool3.join()
+        del pool3
         print("Integration time: %s [seconds]" % (mp_end - mp_start))
         # endregion
 

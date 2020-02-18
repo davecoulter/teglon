@@ -9,7 +9,9 @@ RUN apt-get update && \
 apt-get install htop && \
 pip install --upgrade pip && \
 pip install mysqlclient && \
-pip install tqdm && \
+#pip install ray==0.7.6 && \
+conda install -c conda-forge spherical-geometry && \
+conda update numpy && \
 apt-get clean && rm -rf /opt/conda/pkgs/* && \
 rm -rf /var/lib/apt/lists/*
 

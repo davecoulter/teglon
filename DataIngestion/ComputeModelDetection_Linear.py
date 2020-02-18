@@ -113,7 +113,8 @@ config["data_dir"] = "./"
 
 # Generate all pixel indices
 cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
-GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
+# GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
+GW190814_t_0 = 58598.346134259256  # time of GW190425 merger
 
 
 # endregion
@@ -1231,11 +1232,11 @@ class Teglon:
             print("\t%s" % prob)
             result_table.add_row([model_param_tuple[0], model_param_tuple[1], prob])
 
-        # result_table.write("%s/Detection_Results_Linear_%s.prob" % (formatted_model_output_dir, self.options.sub_dir),
-        #                    overwrite=True, format='ascii.ecsv')
-
-        result_table.write("%s/Detection_Results_Linear_to_GRB.prob" % formatted_model_output_dir,
+        result_table.write("%s/Detection_Results_Linear_%s.prob" % (formatted_model_output_dir, self.options.sub_dir),
                            overwrite=True, format='ascii.ecsv')
+
+        # result_table.write("%s/Detection_Results_Linear_to_GRB.prob" % formatted_model_output_dir,
+        #                    overwrite=True, format='ascii.ecsv')
         # endregion
 
 

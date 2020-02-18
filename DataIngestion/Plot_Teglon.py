@@ -10,6 +10,8 @@ from matplotlib.pyplot import cm
 from matplotlib.patches import CirclePolygon
 from matplotlib import colors
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import matplotlib.patheffects as path_effects
+
 
 import sys
 
@@ -79,6 +81,18 @@ import gc
 import json
 
 import MySQLdb as my
+
+from spherical_geometry.polygon import SphericalPolygon
+import ephem
+from datetime import datetime, timezone, timedelta
+
+from astropy.coordinates import SkyCoord, EarthLocation, AltAz, ICRS
+# from astropy import units as unit
+from scipy import interpolate
+from astropy.time import Time
+from astropy.coordinates import get_sun
+import matplotlib.animation as animation
+
 
 __location__ = os.path.realpath(os.path.join(os.getcwd(), os.path.dirname(__file__)))
 configFile = os.path.join(__location__, 'Settings.ini')
@@ -360,7 +374,8 @@ class Teglon:
             "s": "SWOPE",
             "t": "THACHER",
             "n": "NICKEL",
-            "k": "KAIT"
+            "k": "KAIT",
+            "sn": "SINISTRO"
         }
 
         band_mapping = {
@@ -485,15 +500,15 @@ class Teglon:
                     tiles_to_plot.append(t)
         else:
             select_tiles_per_map = '''
-                SELECT 
-                    ot.FieldName, 
-                    ot.RA, 
-                    ot._Dec, 
-                    ot.MJD, 
-                    ot.Exp_Time, 
-                    ot.Mag_Lim, 
-                    d.`Name` as DetectorName, 
-                    d.Deg_width, 
+                SELECT
+                    ot.FieldName,
+                    ot.RA,
+                    ot._Dec,
+                    ot.MJD,
+                    ot.Exp_Time,
+                    ot.Mag_Lim,
+                    d.`Name` as DetectorName,
+                    d.Deg_width,
                     d.Deg_height
                 FROM ObservedTile ot
                 JOIN Detector d on d.id = ot.Detector_id
@@ -509,131 +524,131 @@ class Teglon:
                 tiles_to_plot.append(t)
 
         tile_colors = {
-            'KAIT': "seagreen",
-            'NICKEL': "mediumpurple",
-            'SWOPE': "red",
+            'KAIT': "red",
+            'NICKEL': "magenta",
+            'SWOPE': "blue",
             'THACHER': "darkorange"
         }
 
         select_2D_pix = '''
-            SELECT 
-                running_prob.id, 
-                running_prob.HealpixMap_id, 
-                running_prob.Pixel_Index, 
-                running_prob.Prob, 
-                running_prob.Distmu, 
-                running_prob.Distsigma, 
-                running_prob.Mean, 
-                running_prob.Stddev, 
-                running_prob.Norm, 
-                running_prob.N128_SkyPixel_id, 
-                running_prob.cum_prob 
-            FROM 
-                (SELECT 
-                    hp_prob.id, 
-                    hp_prob.HealpixMap_id, 
+            SELECT
+                running_prob.id,
+                running_prob.HealpixMap_id,
+                running_prob.Pixel_Index,
+                running_prob.Prob,
+                running_prob.Distmu,
+                running_prob.Distsigma,
+                running_prob.Mean,
+                running_prob.Stddev,
+                running_prob.Norm,
+                running_prob.N128_SkyPixel_id,
+                running_prob.cum_prob
+            FROM
+                (SELECT
+                    hp_prob.id,
+                    hp_prob.HealpixMap_id,
                     hp_prob.Pixel_Index,
-                    hp_prob.Prob, 
-                    hp_prob.Distmu, 
-                    hp_prob.Distsigma, 
-                    hp_prob.Mean, 
-                    hp_prob.Stddev, 
-                    hp_prob.Norm, 
-                    hp_prob.N128_SkyPixel_id, 
-                    SUM(hp_prob.Prob) OVER(ORDER BY hp_prob.Prob DESC) AS cum_prob 
-                FROM 
-                    (SELECT 
-                        hp.id, 
-                        hp.HealpixMap_id, 
+                    hp_prob.Prob,
+                    hp_prob.Distmu,
+                    hp_prob.Distsigma,
+                    hp_prob.Mean,
+                    hp_prob.Stddev,
+                    hp_prob.Norm,
+                    hp_prob.N128_SkyPixel_id,
+                    SUM(hp_prob.Prob) OVER(ORDER BY hp_prob.Prob DESC) AS cum_prob
+                FROM
+                    (SELECT
+                        hp.id,
+                        hp.HealpixMap_id,
                         hp.Pixel_Index,
-                        hp.Prob, 
-                        hp.Distmu, 
-                        hp.Distsigma, 
-                        hp.Mean, 
-                        hp.Stddev, 
-                        hp.Norm, 
-                        hp.N128_SkyPixel_id 
-                    FROM HealpixPixel hp 
-                    WHERE hp.HealpixMap_id = %s 
+                        hp.Prob,
+                        hp.Distmu,
+                        hp.Distsigma,
+                        hp.Mean,
+                        hp.Stddev,
+                        hp.Norm,
+                        hp.N128_SkyPixel_id
+                    FROM HealpixPixel hp
+                    WHERE hp.HealpixMap_id = %s
                     ORDER BY
                         hp.Prob DESC) hp_prob
                     GROUP BY
-                        hp_prob.id, 
-                        hp_prob.HealpixMap_id, 
+                        hp_prob.id,
+                        hp_prob.HealpixMap_id,
                         hp_prob.Pixel_Index,
-                        hp_prob.Prob, 
-                        hp_prob.Distmu, 
-                        hp_prob.Distsigma, 
-                        hp_prob.Mean, 
-                        hp_prob.Stddev, 
-                        hp_prob.Norm, 
-                        hp_prob.N128_SkyPixel_id 
-                    ) running_prob 
-            WHERE 
+                        hp_prob.Prob,
+                        hp_prob.Distmu,
+                        hp_prob.Distsigma,
+                        hp_prob.Mean,
+                        hp_prob.Stddev,
+                        hp_prob.Norm,
+                        hp_prob.N128_SkyPixel_id
+                    ) running_prob
+            WHERE
                 running_prob.cum_prob <= %s
         '''
 
         select_4D_pix = '''
-            SELECT 
-                running_prob.id, 
-                running_prob.HealpixMap_id, 
-                running_prob.Pixel_Index, 
-                running_prob.Prob, 
-                running_prob.NetPixelProb, 
-                running_prob.Distmu, 
-                running_prob.Distsigma, 
-                running_prob.Mean, 
-                running_prob.Stddev, 
-                running_prob.Norm, 
-                running_prob.N128_SkyPixel_id, 
-                running_prob.cum_net_pixel_prob 
-            FROM 
-                (SELECT 
-                    hp_prob.id, 
-                    hp_prob.HealpixMap_id, 
+            SELECT
+                running_prob.id,
+                running_prob.HealpixMap_id,
+                running_prob.Pixel_Index,
+                running_prob.Prob,
+                running_prob.NetPixelProb,
+                running_prob.Distmu,
+                running_prob.Distsigma,
+                running_prob.Mean,
+                running_prob.Stddev,
+                running_prob.Norm,
+                running_prob.N128_SkyPixel_id,
+                running_prob.cum_net_pixel_prob
+            FROM
+                (SELECT
+                    hp_prob.id,
+                    hp_prob.HealpixMap_id,
                     hp_prob.Pixel_Index,
-                    hp_prob.Prob, 
-                    hp_prob.NetPixelProb, 
-                    hp_prob.Distmu, 
-                    hp_prob.Distsigma, 
-                    hp_prob.Mean, 
-                    hp_prob.Stddev, 
-                    hp_prob.Norm, 
-                    hp_prob.N128_SkyPixel_id, 
-                    SUM(hp_prob.NetPixelProb) OVER(ORDER BY hp_prob.NetPixelProb DESC) AS cum_net_pixel_prob 
-                FROM 
-                    (SELECT 
-                        hp.id, 
-                        hp.HealpixMap_id, 
+                    hp_prob.Prob,
+                    hp_prob.NetPixelProb,
+                    hp_prob.Distmu,
+                    hp_prob.Distsigma,
+                    hp_prob.Mean,
+                    hp_prob.Stddev,
+                    hp_prob.Norm,
+                    hp_prob.N128_SkyPixel_id,
+                    SUM(hp_prob.NetPixelProb) OVER(ORDER BY hp_prob.NetPixelProb DESC) AS cum_net_pixel_prob
+                FROM
+                    (SELECT
+                        hp.id,
+                        hp.HealpixMap_id,
                         hp.Pixel_Index,
-                        hp.Prob, 
-                        hpc.NetPixelProb, 
-                        hp.Distmu, 
-                        hp.Distsigma, 
-                        hp.Mean, 
-                        hp.Stddev, 
-                        hp.Norm, 
-                        hp.N128_SkyPixel_id 
-                    FROM HealpixPixel hp 
+                        hp.Prob,
+                        hpc.NetPixelProb,
+                        hp.Distmu,
+                        hp.Distsigma,
+                        hp.Mean,
+                        hp.Stddev,
+                        hp.Norm,
+                        hp.N128_SkyPixel_id
+                    FROM HealpixPixel hp
                     JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp.id
-                    WHERE hp.HealpixMap_id = %s 
+                    WHERE hp.HealpixMap_id = %s
                     ORDER BY
-                        hpc.NetPixelProb DESC) hp_prob 
+                        hpc.NetPixelProb DESC) hp_prob
                     GROUP BY
-                        hp_prob.id, 
-                        hp_prob.HealpixMap_id, 
+                        hp_prob.id,
+                        hp_prob.HealpixMap_id,
                         hp_prob.Pixel_Index,
-                        hp_prob.Prob, 
-                        hp_prob.NetPixelProb, 
-                        hp_prob.Distmu, 
-                        hp_prob.Distsigma, 
-                        hp_prob.Mean, 
-                        hp_prob.Stddev, 
-                        hp_prob.Norm, 
-                        hp_prob.N128_SkyPixel_id 
-                    ) running_prob 
-            WHERE 
-                running_prob.cum_net_pixel_prob <= %s 
+                        hp_prob.Prob,
+                        hp_prob.NetPixelProb,
+                        hp_prob.Distmu,
+                        hp_prob.Distsigma,
+                        hp_prob.Mean,
+                        hp_prob.Stddev,
+                        hp_prob.Norm,
+                        hp_prob.N128_SkyPixel_id
+                    ) running_prob
+            WHERE
+                running_prob.cum_net_pixel_prob <= %s
         '''
 
         select_mwe_pix = '''
@@ -740,8 +755,8 @@ class Teglon:
         ax = fig.add_subplot(111)
         m = Basemap(projection='moll', lon_0=180.0)
 
-        sql_inner_poly.plot(m, ax, edgecolor='black', linewidth=0.5, facecolor='None')
-        sql_outer_poly.plot(m, ax, edgecolor='gray', linewidth=0.5, facecolor='None')
+        sql_inner_poly.plot(m, ax, edgecolor='k', linewidth=0.75, facecolor='None')
+        sql_outer_poly.plot(m, ax, edgecolor='k', linewidth=0.5, facecolor='None')
 
         for p in mwe_pix:
             p.plot(m, ax, edgecolor='None', linewidth=0.5, facecolor='cornflowerblue', alpha=0.5)
@@ -762,17 +777,62 @@ class Teglon:
                 x, y = m(g.ra.degree, g.dec.degree)
                 m.plot(x,y, 'ko', markersize=0.2, linewidth=0.25, alpha=0.3, zorder=9900)
 
+
+        # Plot Sun
+        sun_angle_time = Time(datetime.utcnow(), scale='utc')
+        sun_coord = get_sun(sun_angle_time)
+
+        ra = np.linspace(0, 360, 1000)
+        dec = np.linspace(-90, 90, 1000)
+        RA, DEC = np.meshgrid(ra, dec)
+
+        all_sky = coord.SkyCoord(RA, DEC, unit=(u.deg, u.deg))
+        sun_positions = sun_coord.separation(all_sky)
+        sun_avoidance_contour = m.contour(RA, DEC, sun_positions, latlon=True, levels=[0.0, 60.0], colors='darkorange',
+                                          alpha=1.0, zorder=9990, linewidths=0.5)
+
+        fmt = {}
+        strs = [r'$60\degree$']
+        for l, s in zip(sun_avoidance_contour.levels, strs):
+            fmt[l] = s
+        c_labels = ax.clabel(sun_avoidance_contour, inline=True, fontsize=10, fmt=fmt,
+                  levels=sun_avoidance_contour.levels, colors='k', use_clabeltext=True,
+                  inline_spacing=60, zorder=9999)
+
+        x, y = m(sun_coord.ra.degree, sun_coord.dec.degree)
+        m.plot(x, y, color='gold', marker='o', markersize=10.0, markeredgecolor='darkorange', linewidth=0.25, zorder=9999)
+
+
         # # # -------------- Use this for mollweide projections --------------
         meridians = np.arange(0., 360., 60.)
-        m.drawparallels(np.arange(-90., 91., 30.), fontsize=14, labels=[True, True, False, False], dashes=[2, 2],
-                        linewidth=0.5) # , xoffset=2500000
-        m.drawmeridians(meridians, labels=[False, False, False, False], dashes=[2, 2], linewidth=0.5)
-        # # # ----------------------------------------------------------------
+        # labels = [False, True, False, False] => right, left top, bottom
 
+        dec_str = {
+            60.0:r"+60$\degree$",
+            30.0:r"+30$\degree$",
+            0.0:r"0$\degree$",
+            -30.0:r"-30$\degree$",
+            -60.0:r"-60$\degree$"
+        }
+        m.drawparallels(np.arange(-90., 91., 30.), fmt=lambda dec: dec_str[dec], fontsize=14, labels=[True, False, False, False], dashes=[2, 2],
+                        linewidth=0.5, color="silver", xoffset=2500000, alpha=0.8)
+        m.drawmeridians(meridians, labels=[False, False, False, False], dashes=[2, 2], linewidth=0.5, color="silver", alpha=0.8)
+        ra_labels = {
+            300.0: "20h",
+            240.0: "16h",
+            180.0: "12h",
+            120.0: "8h",
+            60.0: "4h"
+        }
+
+        for mer in meridians[1:]:
+            # plt.annotate("%0.0f" % mer, xy=m(mer, 0), xycoords='data', color="silver", fontsize=14, zorder=9999)
+            plt.annotate(ra_labels[mer], xy=m(mer+8.0, -30), xycoords='data', color="k", fontsize=14, zorder=9999)
+        # # # ----------------------------------------------------------------
         ax.invert_xaxis()
 
-        plt.ylabel(r'$\mathrm{Declination}$', fontsize=16, labelpad=36)
-        plt.xlabel(r'$\mathrm{Right\;Ascension}$', fontsize=16, labelpad=30)
+        plt.ylabel(r'$\mathrm{Declination}$', fontsize=16, labelpad=5)
+        plt.xlabel(r'$\mathrm{Right\;Ascension}$', fontsize=16, labelpad=5)
 
         output_path = "%s/%s" % (formatted_healpix_dir, self.options.tile_file.replace(".csv", ".png"))
         fig.savefig(output_path, bbox_inches='tight')  # ,dpi=840

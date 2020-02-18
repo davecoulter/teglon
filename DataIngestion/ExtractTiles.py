@@ -457,6 +457,14 @@ class Teglon:
         _4D = "4D"
         _2D = "2D"
 
+        # Valid detectors names
+        valid_detector_names = {
+            "THACHER",
+            "SWOPE",
+            "NICKEL",
+            "SINISTRO"
+        }
+
         band_mapping = {
             "g": "SDSS g",
             "r": "SDSS r",
@@ -517,6 +525,10 @@ class Teglon:
         if self.options.t_cum_prob > 0.95 or self.options.t_cum_prob < 0.20:
             is_error = True
             print("Thacher cumulative prob must be between 0.2 and 0.95")
+
+        if self.options.galaxies_detector not in valid_detector_names:
+            is_error = True
+            print("Invalid galaxies detector. Must be one of: %s" % valid_detector_names)
 
         is_Swope_box_query = False
         if self.options.s_min_ra != -1 and \
@@ -622,6 +634,9 @@ class Teglon:
         s_detector_id = int(s_detector_result[0])
         t_detector_result = query_db([detector_select_by_name % THACHER])[0][0]
         t_detector_id = int(t_detector_result[0])
+        g_detector_result = query_db([detector_select_by_name % GALAXY])[0][0]
+        g_detector_min_dec = float(g_detector_result[6])
+        g_detector_max_dec = float(g_detector_result[7])
 
         # 4D NON-BOX QUERY
         # REPLACEMENT PARAMETERS: (band_F99, detector_id, healpix_map_id, self.options.cum_prob, band_F99,
@@ -855,6 +870,9 @@ class Teglon:
             running_tile_prob.net_prob DESC 
         '''
 
+        # GALAXIES SELECT
+        # REPLACEMENT PARAMETERS: (band_F99, healpix_map_id, band_F99, self.options.extinct, g_detector_min_dec,
+        # g_detector_max_dec)
         galaxies_select = '''
         SELECT 
             gd2.id, 
@@ -866,16 +884,24 @@ class Teglon:
             gd2.z_dist, 
             gd2.B, 
             gd2.K, 
-            hp_gd2_w.GalaxyProb 
+            hp_gd2_w.GalaxyProb, 
+            sp_ebv.EBV*%s AS A_lambda 
         FROM 
             GalaxyDistance2 gd2 
         JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
         JOIN HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
         JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp_gd2.HealpixPixel_id 
+        JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
+        JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = hp.N128_SkyPixel_id 
         WHERE 
-            hpc.HealpixMap_id = %s 
+            hpc.HealpixMap_id = %s AND 
+            sp_ebv.EBV*%s <= %s AND 
+            gd2._Dec BETWEEN %s AND %s 
         '''
 
+        # GALAXIES SELECT
+        # REPLACEMENT PARAMETERS: (band_F99, healpix_map_id, band_F99, self.options.extinct, g_min_ra, g_max_ra,
+        # g_min_dec, g_max_dec)
         box_galaxies_select = '''
         SELECT 
             gd2.id, 
@@ -887,14 +913,18 @@ class Teglon:
             gd2.z_dist, 
             gd2.B, 
             gd2.K, 
-            hp_gd2_w.GalaxyProb 
+            hp_gd2_w.GalaxyProb, 
+            sp_ebv.EBV*%s AS A_lambda 
         FROM 
             GalaxyDistance2 gd2 
         JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
         JOIN HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
         JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp_gd2.HealpixPixel_id 
+        JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
+        JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = hp.N128_SkyPixel_id 
         WHERE 
             hpc.HealpixMap_id = %s AND 
+            sp_ebv.EBV*%s <= %s AND 
             gd2.RA BETWEEN %s AND %s AND 
             gd2._Dec BETWEEN %s AND %s 
         '''
@@ -916,12 +946,16 @@ class Teglon:
         if is_Galaxy_box_query:
             g_formatted_output_path = box_galaxies_formatter % (formatted_healpix_dir, "GALAXIES",
                                                                        self.options.healpix_file.replace(",", "_"))
-            g_select_to_execute = box_galaxies_select % (healpix_map_id, self.options.g_min_ra, self.options.g_max_ra,
+            # (f99, healpix_map_id, f99, extinct, ra1, ra2, dec1, dec2)
+            g_select_to_execute = box_galaxies_select % (g_band_F99, healpix_map_id, g_band_F99, self.options.extinct,
+                                                         self.options.g_min_ra, self.options.g_max_ra,
                                                          self.options.g_min_dec, self.options.g_max_dec)
         else:
             g_formatted_output_path = non_box_galaxies_formatter % (formatted_healpix_dir, "GALAXIES",
                                                                        self.options.healpix_file.replace(",", "_"))
-            g_select_to_execute = galaxies_select % healpix_map_id
+            # (f99, healpix_mpa_id, f99, extinction, min_dec, max_dec)
+            g_select_to_execute = galaxies_select % (g_band_F99, healpix_map_id, g_band_F99, self.options.extinct,
+                                                     g_detector_min_dec, g_detector_max_dec)
 
         if is_Swope_box_query:
             s_formatted_output_path = box_file_formatter % (formatted_healpix_dir, SWOPE, self.options.prob_type,

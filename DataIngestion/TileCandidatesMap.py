@@ -337,7 +337,8 @@ class Teglon:
         parser.add_option('--gw_id', default="", type="str",
                         help='LIGO superevent name, e.g. `S190425z` ')
 
-        parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",help='Directory for where to look for the healpix file.')
+        parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",
+                          help='Directory for where to look for the healpix file.')
 
         parser.add_option('--candidate_dir', default='../Events/{GWID}/Candidates', type="str",
                           help='Directory for where to look for the healpix file.')
@@ -346,9 +347,15 @@ class Teglon:
 
         parser.add_option('--candidate_file', default="", type="str", help='Filename of candidates to cross-reference.')
 
+        parser.add_option('--coord_format', default="hour", type="str",
+                          help='What format the sky coordinates are in. Available: "hour" or "deg". Default: "hour:')
+
         return(parser)
 
     def main(self):
+
+        HOUR_FORMAT = "hour"
+        DEG_FORMAT = "deg"
 
         healpix_map_select = "SELECT id, RescaledNSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
         healpix_map_id = -1
@@ -363,6 +370,10 @@ class Teglon:
         if self.options.candidate_file == "":
             is_error = True
             print("You must specify which candidate file to process.")
+
+        if self.options.coord_format != HOUR_FORMAT and self.options.coord_format != DEG_FORMAT:
+            is_error = True
+            print("Incorrect `coord_format`!")
 
         # Parameter checks
         if self.options.gw_id == "":
@@ -384,10 +395,9 @@ class Teglon:
             is_error = True
             print("Could not find GW event based on --gw_id=%s and --healpix_file=%s." % (self.options.gw_id,
                                                                                           self.options.healpix_file))
-
-
         formatted_healpix_dir = self.options.healpix_dir
         formatted_candidate_dir = self.options.candidate_dir
+
         if "{GWID}" in formatted_healpix_dir:
             formatted_healpix_dir = formatted_healpix_dir.replace("{GWID}", self.options.gw_id)
 
@@ -402,7 +412,8 @@ class Teglon:
         print("Target File name: %s" % target_file_name)
 
         resolved_candidate_file_path = "%s/%s" % (formatted_candidate_dir, target_file_name + "_resolved.txt")
-
+        resolved_candidate_galaxies_file_path = "%s/%s" % (formatted_candidate_dir, target_file_name +
+                                                           "_galaxies_resolved.txt")
         if is_error:
             print("Exiting...")
             return 1
@@ -412,6 +423,45 @@ class Teglon:
             FROM StaticTile 
             WHERE Detector_id = %s and 
                 st_contains(Poly, ST_GeomFromText('POINT(%s %s)', 4326));
+        '''
+
+        galaxies_in_tile_select = '''
+            SELECT 
+                st.id as StaticTile_id,  
+                st.FieldName, 
+                st.RA as StaticTile_RA, 
+                st._Dec as StaticTile_Dec, 
+                hp.id as HealpixPixel_id, 
+                gd2.id as Galaxy_id, 
+                gd2.RA as Galaxy_RA, 
+                gd2._Dec as Galaxy_Dec, 
+                gd2.PGC, 
+                gd2.Name_GWGC, 
+                gd2.Name_HyperLEDA, 
+                gd2.Name_2MASS, 
+                gd2.Name_SDSS_DR12, 
+                hp_gd2_w.GalaxyProb as Galaxy_4D_Prob, 
+                gd2.z, 
+                gd2.z_dist, 
+                gd2.z_dist_err, 
+                gd2.B, 
+                gd2.K 
+            FROM 
+                GalaxyDistance2 gd2 
+            JOIN 
+                HealpixPixel_GalaxyDistance2 hp_gd2 on  hp_gd2.GalaxyDistance2_id = gd2.id 
+            JOIN 
+                HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
+            JOIN 
+                HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
+            JOIN 
+                HealpixMap hm on hm.id = hp.HealpixMap_id 
+            JOIN 
+                StaticTile_HealpixPixel st_hp on st_hp.HealpixPixel_id = hp.id 
+            JOIN 
+                StaticTile st on st.id = st_hp.StaticTile_id 
+            WHERE 
+                st.id = %s 
         '''
 
         _2d_prob_percentile = '''
@@ -443,22 +493,32 @@ class Teglon:
         SWOPE_id = 1
         THACHER_id = 3
         candidates = []
+
+        candidate_galaxies = {}
         with open(candidate_file_path,'r') as csvfile:
 
-            csvreader = csv.reader(csvfile, delimiter=',',skipinitialspace=True)
-            next(csvreader)
+            csvreader = csv.reader(csvfile, delimiter=' ', skipinitialspace=True)
 
             for row in csvreader:
 
                 name = row[0]
                 ra = row[1]
                 dec = row[2]
-                c = coord.SkyCoord(ra, dec, unit=(u.deg, u.deg))
+
+                dec_unit = u.hour
+                if self.options.coord_format == DEG_FORMAT:
+                    dec_unit = u.deg
+                c = coord.SkyCoord(ra, dec, unit=(dec_unit, u.deg))
 
                 print("Processing `%s`" % name)
 
                 swope_tile = query_db([tile_select % (SWOPE_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
                 thacher_tile = query_db([tile_select % (THACHER_id, c.dec.degree, c.ra.degree - 180.0)])[0][0]
+
+                swope_tile_id = swope_tile[0]
+                thacher_tile_id = thacher_tile[0]
+                swope_galaxies = query_db([galaxies_in_tile_select % swope_tile_id])[0]
+                thacher_galaxies = query_db([galaxies_in_tile_select % thacher_tile_id])[0]
 
                 pixel_index = hp.ang2pix(int(healpix_map_nside), 0.5*np.pi - c.dec.radian, c.ra.radian)
                 print("\tPixel Index: %s" % pixel_index)
@@ -466,8 +526,27 @@ class Teglon:
                 _2d = query_db([_2d_prob_percentile % (healpix_map_id, pixel_index, healpix_map_id)])[0][0][0]
                 _4d = query_db([_4d_prob_percentile % (healpix_map_id, pixel_index, healpix_map_id)])[0][0][0]
 
-                t = (name, ra, dec, c.ra.degree, c.dec.degree, healpix_map_nside, pixel_index, swope_tile[2], thacher_tile[2], _2d, _4d)
+                t = (name, ra, dec, c.ra.degree, c.dec.degree, healpix_map_nside, pixel_index,
+                     swope_tile[2], thacher_tile[2], swope_tile[7], _2d, _4d)
                 candidates.append(t)
+
+                candidate_galaxies[name] = []
+
+                for sg in swope_galaxies:
+                    c_gal = coord.SkyCoord(sg[6], sg[7], unit=(u.deg, u.deg))
+                    sep_arc_sec = c.separation(c_gal).arcsecond
+
+                    candidate_galaxies[name].append((sg[1], sg[8], sg[9], sg[10], sg[11],
+                                   sg[12], sg[6], sg[7], sg[13], sg[14],
+                                   sg[15], sg[16], sg[17], sg[18], sep_arc_sec))
+
+                for tg in thacher_galaxies:
+                    c_gal = coord.SkyCoord(sg[6], sg[7], unit=(u.deg, u.deg))
+                    sep_arc_sec = c.separation(c_gal).arcsecond
+
+                    candidate_galaxies[name].append((tg[1], tg[8], tg[9], tg[10], tg[11],
+                               tg[12], tg[6], tg[7], tg[13], tg[14],
+                               tg[15], tg[16], tg[17], tg[18], sep_arc_sec))
 
 
         with open(resolved_candidate_file_path,'w') as csvfile:
@@ -483,12 +562,44 @@ class Teglon:
             cols.append('Pixel_Index')
             cols.append('Swope_Tile')
             cols.append('Thacher_Tile')
+            cols.append('E(B-V)')
             cols.append('2D_Percentile')
             cols.append('Teglon_Percentile')
             csvwriter.writerow(cols)
 
             for i, row in enumerate(candidates):
                 csvwriter.writerow(row)
+
+        with open(resolved_candidate_galaxies_file_path,'w') as csvfile:
+                csvwriter = csv.writer(csvfile)
+
+                cols = []
+                cols.append('# FieldName')
+                cols.append('PGC')
+                cols.append('Name_GWGC')
+                cols.append('Name_HyperLEDA')
+                cols.append('Name_2MASS')
+                cols.append('Name_SDSS_DR12')
+                cols.append('RA_deg')
+                cols.append('Dec_deg')
+                cols.append('4D_Prob')
+                cols.append('z')
+                cols.append('z_dist')
+                cols.append('z_dist_err')
+                cols.append('Galaxy_B')
+                cols.append('Galaxy_K')
+                cols.append('Sep [arcsec]')
+
+                for candidate_name, galaxies in candidate_galaxies.items():
+                    csvfile.write("# " + candidate_name + " \n\n")
+                    csvwriter.writerow(cols)
+
+                    # Sort by closest galaxy to candidate
+                    sorted_galaxies = sorted(galaxies, key=lambda x:float(x[14]))
+                    for row in sorted_galaxies:
+                        csvwriter.writerow(row)
+
+                    csvfile.write("\n\n")
 
         print("Done.")
 
@@ -499,13 +610,15 @@ if __name__ == "__main__":
     useagestring="""python TileCandidatesMap.py [options]
 
 Example with healpix_dir defaulted to 'Events/<gwid>':
-python TileCandidatesMap.py --gw_id <gwid> --healpix_file <filename> --candidate_file <filename>
+python TileCandidatesMap.py --gw_id <gwid> --healpix_file <filename> --candidate_file <filename> --coord_format <format>
 
-INPUT FORMAT for `candidate_file`
+INPUT FORMAT for `candidate_file` (No header)
 
-Name, RA (decimal), DEC (decimal)
-2019nmd,12.87085,-22.47137778
 ...
+2019nmd     12.87085    -22.47137778    2000
+...
+
+Note: Same format will work for JSkyCalc
 
 """
 
