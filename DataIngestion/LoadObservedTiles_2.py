@@ -358,9 +358,15 @@ class Teglon:
         parser.add_option('--tele', default="", type="str",
                           help='Telescope abbreviation that `tile_file` corresponds to.')
 
+        parser.add_option('--coord_format', default="hour", type="str",
+                          help='What format the sky coordinates are in. Available: "hour" or "deg". Default: "hour".')
+
         return (parser)
 
     def main(self):
+
+        HOUR_FORMAT = "hour"
+        DEG_FORMAT = "deg"
 
         # Band abbreviation, band_id mapping
         band_mapping = {
@@ -404,6 +410,10 @@ class Teglon:
             is_error = True
             print("Telescope abbreviation is required.")
 
+        if self.options.coord_format != HOUR_FORMAT and self.options.coord_format != DEG_FORMAT:
+            is_error = True
+            print("Incorrect `coord_format`!")
+
         if is_error:
             print("Exiting...")
             return 1
@@ -431,18 +441,6 @@ class Teglon:
         if self.options.tele not in detector_mapping:
             is_error = True
             print("Unknown telescope abbreviation: %s " % self.options.tele)
-
-        # TODO: STANDARDIZE FILE FORMATTING
-        # God damn you Charlie, you beautiful son of a bitch.
-
-        # tile_files = []
-        # for file in os.listdir(formatted_tile_dir):
-        # 	if file.endswith(".dat"):
-        # 		tile_files.append("%s/%s" % (formatted_tile_dir, file))
-
-        # if len(tile_files) <= 0:
-        # 	is_error = True
-        # 	print("There are no tiles to process.")
 
         if is_error:
             print("Exiting...")
@@ -480,8 +478,6 @@ class Teglon:
         band_select = "SELECT id, Name, F99_Coefficient FROM Band WHERE `Name`='%s'"
         detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec FROM Detector WHERE Name='%s'"
 
-        # print("Processing %s tiles" % len(tile_files))
-        # observed_tiles = []
         obs_tile_insert_data = []
         detectors = {}
 
@@ -506,18 +502,15 @@ class Teglon:
 
                 file_name = row[0]
                 field_name = row[1]
-
-                # # ANDICAM format
-                # ra = row[2].strip()
-                # dec = row[3].strip()
-                # band = row[4].strip()
-
-                # STN data format
                 ra = float(row[2])
                 dec = float(row[3])
                 exp_time = float(row[4])
                 mjd = float(row[5])
                 band = row[6].strip()
+
+                # For ANDICAM, the filter is in the filename...
+                if self.options.tele == "a" and band == "___":
+                    band = file_name.split(".")[1]
 
                 # # KAIT data format
                 # ra = float(row[2])
@@ -533,6 +526,7 @@ class Teglon:
                 # except:
                 #     pass
                 #
+
                 mag_lim = None
                 try:
                     mag_lim = float(row[7])
@@ -547,10 +541,10 @@ class Teglon:
                 band_name = band_results[1]
                 band_F99 = float(band_results[2])
 
-                # STN + KAIT format
-                c = coord.SkyCoord(ra, dec, unit=(u.deg, u.deg))
-                # # ANDICAM format
-                # c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
+                dec_unit = u.hour
+                if self.options.coord_format == DEG_FORMAT:
+                    dec_unit = u.deg
+                c = coord.SkyCoord(ra, dec, unit=(dec_unit, u.deg))
 
                 n128_index = hp.ang2pix(nside128, 0.5 * np.pi - c.dec.radian, c.ra.radian)  # theta, phi
                 n128_id = N128_dict[n128_index]
@@ -566,6 +560,7 @@ class Teglon:
 
                 # observed_tiles.append(t)
                 obs_tile_insert_data.append((
+                    file_name,
                     detector.id,
                     t.field_name,
                     t.ra_deg,
@@ -580,85 +575,11 @@ class Teglon:
                     t.mag_lim,
                     healpix_map_id))
 
-        # iterate over tiles in tile_files
-        # for tf in tile_files:
-
-        # 	# Read Tile File CSV and get the telescope (by file naming convention)
-        # 	file_name = tf.split("/")[-1]
-        # 	tele_abbr = file_name.split("_")[0]
-        # 	tele_name = detector_mapping[tele_abbr]
-
-        # 	detector_result = query_db([detector_select_by_name % tele_name])[0][0]
-        # 	detector = Detector(detector_result[1], float(detector_result[2]), float(detector_result[2]))
-        # 	detector.id = int(detector_result[0])
-        # 	detector.area = float(detector_result[5])
-
-        # 	if detector.name not in detectors:
-        # 		detectors[detector.name] = detector
-        # 	print("Processing `%s` for %s" % (file_name, detector.name))
-
-        # 	with open(tf,'r') as csvfile:
-
-        # 		# Read CSV lines
-        # 		csvreader = csv.reader(csvfile, delimiter=' ',skipinitialspace=True)
-
-        # 		for row in csvreader:
-
-        # 			file_name = row[0]
-        # 			field_name = row[1]
-        # 			ra = float(row[2])
-        # 			dec = float(row[3])
-        # 			# ra = row[2]
-        # 			# dec = row[3]
-        # 			exp_time = float(row[4])
-        # 			mjd = float(row[5])
-        # 			band = row[6]
-        # 			mag_lim = float(row[7]) if row[7] != '___' else None
-        # 			# mag_lim = None
-
-        # 			# Get Band_id
-        # 			band_map = band_mapping[band]
-        # 			band_results = query_db([band_select % band_map])[0][0]
-
-        # 			band_id = band_results[0]
-        # 			band_name = band_results[1]
-        # 			band_F99 = float(band_results[2])
-
-        # 			c = coord.SkyCoord(ra, dec, unit=(u.deg, u.deg))
-        # 			# c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
-        # 			n128_index = hp.ang2pix(nside128, 0.5*np.pi - c.dec.radian, c.ra.radian) # theta, phi
-        # 			n128_id = N128_dict[n128_index]
-
-        # 			t = Tile(c.ra.degree, c.dec.degree, detector.deg_width, detector.deg_height, int(healpix_map_nside))
-        # 			t.field_name = field_name
-        # 			t.N128_pixel_id = n128_id
-        # 			t.N128_pixel_index = n128_index
-        # 			t.mwe = ebv[n128_index]*band_F99
-        # 			t.mjd = mjd
-        # 			t.exp_time = exp_time
-        # 			t.mag_lim = mag_lim
-
-        # 			# observed_tiles.append(t)
-        # 			obs_tile_insert_data.append((
-        # 				detector.id,
-        # 				t.field_name,
-        # 				t.ra_deg,
-        # 				t.dec_deg,
-        # 				"POINT(%s %s)" % (t.dec_deg, t.ra_deg - 180.0),  # Dec, RA order due to MySQL convention for lat/lon
-        # 				t.query_polygon_string,
-        # 				str(t.mwe),
-        # 				t.N128_pixel_id,
-        # 				band_id,
-        # 				t.mjd,
-        # 				t.exp_time,
-        # 				t.mag_lim,
-        # 				healpix_map_id))
-
         insert_observed_tile = '''
-			INSERT INTO
-				ObservedTile (Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id)
-			VALUES (%s, %s, %s, %s, ST_PointFromText(%s, 4326), ST_GEOMFROMTEXT(%s, 4326), %s, %s, %s, %s, %s, %s, %s)
-		'''
+            INSERT INTO
+                ObservedTile (FileName, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id)
+            VALUES (%s, %s, %s, %s, %s, ST_PointFromText(%s, 4326), ST_GEOMFROMTEXT(%s, 4326), %s, %s, %s, %s, %s, %s, %s)
+        '''
 
         print("Inserting %s tiles..." % len(obs_tile_insert_data))
         batch_insert(insert_observed_tile, obs_tile_insert_data)
@@ -668,10 +589,10 @@ class Teglon:
         print("Building observed tile-healpix map pixel relation...")
 
         obs_tile_select = '''
-			SELECT id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id 
-			FROM ObservedTile 
-			WHERE Detector_id = %s and HealpixMap_id = %s 
-		'''
+            SELECT FileName, id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id 
+            FROM ObservedTile 
+            WHERE Detector_id = %s and HealpixMap_id = %s 
+        '''
 
         # Obtain the tile with id's so they can be used in later INSERTs
         tile_pixel_data = []
@@ -681,15 +602,14 @@ class Teglon:
             print("Observed Tiles for %s: %s" % (d.name, len(obs_tiles_for_detector)))
             for otfd in obs_tiles_for_detector:
 
-                ot_id = int(otfd[0])
-                ra = float(otfd[3])
-                dec = float(otfd[4])
+                ot_id = int(otfd[1])
+                ra = float(otfd[4])
+                dec = float(otfd[5])
                 t = Tile(ra, dec, d.deg_width, d.deg_height, healpix_map_nside)
                 t.id = ot_id
 
                 for p in t.enclosed_pixel_indices:
-                    if p in map_pixel_dict: # Hack -- why is this ever NOT true?
-                        tile_pixel_data.append((t.id, map_pixel_dict[p][0]))
+                    tile_pixel_data.append((t.id, map_pixel_dict[p][0]))
 
         print("Length of tile_pixel_data: %s" % len(tile_pixel_data))
 
@@ -720,10 +640,10 @@ class Teglon:
 
         print("Bulk uploading `tile_pixel_data`...")
         ot_hp_upload_sql = """LOAD DATA LOCAL INFILE '%s' 
-					INTO TABLE ObservedTile_HealpixPixel 
-					FIELDS TERMINATED BY ',' 
-					LINES TERMINATED BY '\n' 
-					(ObservedTile_id, HealpixPixel_id);"""
+                    INTO TABLE ObservedTile_HealpixPixel 
+                    FIELDS TERMINATED BY ',' 
+                    LINES TERMINATED BY '\n' 
+                    (ObservedTile_id, HealpixPixel_id);"""
 
         success = bulk_upload(ot_hp_upload_sql % tile_pixel_upload_csv)
         if not success:
