@@ -461,7 +461,7 @@ class Teglon:
             JOIN 
                 StaticTile st on st.id = st_hp.StaticTile_id 
             WHERE 
-                st.id = %s 
+                st.id = %s AND hm.id = %s 
         '''
 
         _2d_prob_percentile = '''
@@ -517,8 +517,8 @@ class Teglon:
 
                 swope_tile_id = swope_tile[0]
                 thacher_tile_id = thacher_tile[0]
-                swope_galaxies = query_db([galaxies_in_tile_select % swope_tile_id])[0]
-                thacher_galaxies = query_db([galaxies_in_tile_select % thacher_tile_id])[0]
+                swope_galaxies = query_db([galaxies_in_tile_select % (swope_tile_id, healpix_map_id)])[0]
+                thacher_galaxies = query_db([galaxies_in_tile_select % (thacher_tile_id, healpix_map_id)])[0]
 
                 pixel_index = hp.ang2pix(int(healpix_map_nside), 0.5*np.pi - c.dec.radian, c.ra.radian)
                 print("\tPixel Index: %s" % pixel_index)

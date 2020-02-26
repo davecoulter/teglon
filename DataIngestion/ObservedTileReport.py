@@ -385,10 +385,8 @@ class Teglon:
             return 1
 
         # Get Map ID
-        healpix_map_select = "SELECT id, NSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
+        healpix_map_select = "SELECT id FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
         healpix_map_id = int(query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0])
-        healpix_map_nside = int(
-            query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][1])
 
         # Get all conposed observed tiles for this map
         observed_tile_select = '''
@@ -470,7 +468,7 @@ class Teglon:
             JOIN 
                 ObservedTile ot on ot.id = ot_hp.ObservedTile_id 
             WHERE 
-                ot.id = %s
+                ot.id = %s AND hm.id = %s 
         '''
 
         observed_tile_pixel_select = '''
@@ -490,9 +488,8 @@ class Teglon:
         '''
 
         for ot in observed_tile_result:
-            ot_file_name = ot[0]
             ot_id = ot[1]
-            observed_tile_galaxy_result = query_db([observed_tile_galaxy_select % ot_id])[0]
+            observed_tile_galaxy_result = query_db([observed_tile_galaxy_select % (ot_id, healpix_map_id)])[0]
             observed_tile_pixel_result = query_db([observed_tile_pixel_select % ot_id])[0]
 
             # Get weighted mean for distance and completeness based on the 4D prob
@@ -500,8 +497,13 @@ class Teglon:
             pix_comp = np.asarray([float(otpr[3]) for otpr in observed_tile_pixel_result])
             pix_dist = np.asarray([float(otpr[4]) for otpr in observed_tile_pixel_result])
 
-            weighted_mean_dist = np.average(pix_dist, weights=pix_weights)
-            weighted_pix_comp = np.average(pix_comp, weights=pix_weights)
+            avg_mean_dist = np.average(pix_dist)
+            avg_pix_comp = np.average(pix_comp)
+
+            # If we can weight the average, do so...
+            if np.sum(pix_weights) > 0.0:
+                avg_mean_dist = np.average(pix_dist, weights=pix_weights)
+                avg_pix_comp = np.average(pix_comp, weights=pix_weights)
 
             field_name = ot[2]
             ascii_ecsv_fname = "%s_%s.txt" % (ot_id, field_name)
@@ -540,8 +542,8 @@ class Teglon:
                     "{key}={value}".format(key="Net 2D Prob", value=ot[12]),
                     "{key}={value}".format(key="Redistributed 2D Prob", value=ot[13]),
                     "{key}={value}".format(key="Net 4D Prob", value=ot[14]),
-                    "{key}={value}".format(key="Weighted Mean Pixel Comp", value=weighted_pix_comp),
-                    "{key}={value}".format(key="Weighted Mean Pixel Dist", value=weighted_mean_dist)
+                    "{key}={value}".format(key="Weighted Mean Pixel Comp", value=avg_pix_comp),
+                    "{key}={value}".format(key="Weighted Mean Pixel Dist", value=avg_mean_dist)
                     ]
             result_table.meta['comment'] = meta
             for otgr in observed_tile_galaxy_result:

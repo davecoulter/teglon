@@ -99,7 +99,6 @@ build_galaxy_pixel_relation = True
 build_completeness_func = True
 build_galaxy_weights = True
 
-
 # Database SELECT
 # For every sub-query, the iterable result is appended to a master list of results
 def bulk_upload(query):
@@ -370,6 +369,12 @@ class Teglon:
         parser.add_option('--load_local_file', action="store_true", default=False,
                           help='''Circumvent downloading map and load map from disk''')
 
+        parser.add_option('--skip_swope', action="store_true", default=False,
+                          help='''Do not register Swope tiles for this map''')
+
+        parser.add_option('--skip_thacher', action="store_true", default=False,
+                          help='''Do not register Thacher tiles for this map''')
+
         return (parser)
 
     def main(self):
@@ -404,6 +409,17 @@ class Teglon:
             is_error = True
             print('''The combination of GWID `%s` and healpix file `%s` already exists in the db. Please choose a unique 
 combination''' % (self.options.gw_id, self.options.healpix_file))
+
+        if self.options.skip_swope:
+            print("**** Not registering Swope tiles for this event! ****")
+
+        if self.options.skip_thacher:
+            print("**** Not registering Thacher tiles for this event! ****")
+
+        # Only build tile-pixel relations if we don't skip both Swope AND Thacher
+        build_tile_pixel_relation = self.options.skip_swope or self.options.skip_thacher
+        if not build_tile_pixel_relation:
+            print("**** Skipping tile-pixel relations entirely! ****")
 
         if is_error:
             print("Exiting...")
@@ -664,7 +680,7 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
             # and finally they are written to the working directory as a CSV that is bulk uploaded to the db. Clean up the file
             # afterward.
 
-            healpix_map_select = "SELECT id, NSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
+            healpix_map_select = "SELECT id FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
             healpix_map_id = query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0]
 
             # Associate these healpix pixels with our N128 Sky Pixels
@@ -803,121 +819,123 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
             tile_select = "SELECT id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id FROM StaticTile WHERE Detector_id = %s "
             tile_pixel_upload_csv = "%s/%s_tile_pixel_upload.csv" % (formatted_healpix_dir, self.options.gw_id)
 
-            ##### DO SWOPE ######
-            # Get detector -> static tile rows
-            swope_detector = query_db([select_detector_id % "SWOPE"])[0][0]
-            swope_id = swope_detector[0]
-            swope_static_tile_rows = query_db([tile_select % swope_id])[0]
-
-            swope_tiles = []
-            for r in swope_static_tile_rows:
-                t = Tile(float(r[3]), float(r[4]), float(swope_detector[2]), float(swope_detector[3]), map_nside)
-                t.id = int(r[0])
-                t.mwe = float(r[7])
-                swope_tiles.append(t)
-
-            # clean up
-            print("freeing `swope_static_tile_rows`...")
-            del swope_static_tile_rows
-
-            t1 = time.time()
-            initialized_swope_tiles = None
-            with mp.Pool() as pool:
-                initialized_swope_tiles = pool.map(initialize_tile, swope_tiles)
-
-            # clean up
-            print("freeing `swope_tiles`...")
-            del swope_tiles
-            t2 = time.time()
-
-            print("\n********* start DEBUG ***********")
-            print("Swope Tile initialization execution time: %s" % (t2 - t1))
-            print("********* end DEBUG ***********\n")
-
-            # Insert Tile/Healpix pixel relations
             tile_pixel_data = []
-            for t in initialized_swope_tiles:
-                for p in t.enclosed_pixel_indices:
-                    tile_pixel_data.append((t.id, map_pixel_dict[p][0]))
+            if not self.options.skip_swope:
+                ##### DO SWOPE ######
+                # Get detector -> static tile rows
+                swope_detector = query_db([select_detector_id % "SWOPE"])[0][0]
+                swope_id = swope_detector[0]
+                swope_static_tile_rows = query_db([tile_select % swope_id])[0]
 
-            # Create CSV
-            try:
+                swope_tiles = []
+                for r in swope_static_tile_rows:
+                    t = Tile(float(r[3]), float(r[4]), float(swope_detector[2]), float(swope_detector[3]), map_nside)
+                    t.id = int(r[0])
+                    t.mwe = float(r[7])
+                    swope_tiles.append(t)
+
+                # clean up
+                print("freeing `swope_static_tile_rows`...")
+                del swope_static_tile_rows
+
                 t1 = time.time()
-                print("Creating `%s`" % tile_pixel_upload_csv)
-                with open(tile_pixel_upload_csv, 'w') as csvfile:
-                    csvwriter = csv.writer(csvfile)
-                    for data in tile_pixel_data:
-                        csvwriter.writerow(data)
+                initialized_swope_tiles = None
+                with mp.Pool() as pool:
+                    initialized_swope_tiles = pool.map(initialize_tile, swope_tiles)
 
+                # clean up
+                print("freeing `swope_tiles`...")
+                del swope_tiles
                 t2 = time.time()
+
                 print("\n********* start DEBUG ***********")
-                print("Tile-Pixel CSV creation execution time: %s" % (t2 - t1))
+                print("Swope Tile initialization execution time: %s" % (t2 - t1))
                 print("********* end DEBUG ***********\n")
-            except Error as e:
-                print("Error in creating Tile-Pixel CSV:\n")
-                print(e)
-                print("\nExiting")
-                return 1
 
-            # clean up
-            print("freeing `tile_pixel_data`...")
-            del tile_pixel_data
+                # Insert Tile/Healpix pixel relations
+                for t in initialized_swope_tiles:
+                    for p in t.enclosed_pixel_indices:
+                        tile_pixel_data.append((t.id, map_pixel_dict[p][0]))
 
-            ##### DO THACHER ######
-            # Get detector -> static tile rows
-            thacher_detector = query_db([select_detector_id % "THACHER"])[0][0]
-            thacher_id = thacher_detector[0]
-            thacher_static_tile_rows = query_db([tile_select % thacher_id])[0]
+                # Create CSV
+                try:
+                    t1 = time.time()
+                    print("Appending `%s`" % tile_pixel_upload_csv)
+                    with open(tile_pixel_upload_csv, 'a') as csvfile:
+                        csvwriter = csv.writer(csvfile)
+                        for data in tile_pixel_data:
+                            csvwriter.writerow(data)
 
-            thacher_tiles = []
-            for r in thacher_static_tile_rows:
-                t = Tile(float(r[3]), float(r[4]), float(thacher_detector[2]), float(thacher_detector[3]), map_nside)
-                t.id = int(r[0])
-                t.mwe = float(r[7])
-                thacher_tiles.append(t)
+                    t2 = time.time()
+                    print("\n********* start DEBUG ***********")
+                    print("Tile-Pixel CSV creation execution time: %s" % (t2 - t1))
+                    print("********* end DEBUG ***********\n")
+                except Error as e:
+                    print("Error in creating Tile-Pixel CSV:\n")
+                    print(e)
+                    print("\nExiting")
+                    return 1
 
-            # clean up
-            print("freeing `thacher_static_tile_rows`...")
-            del thacher_static_tile_rows
+                # clean up
+                print("freeing `tile_pixel_data`...")
+                del tile_pixel_data
 
-            t1 = time.time()
-            initialized_thacher_tiles = None
-            with mp.Pool() as pool:
-                initialized_thacher_tiles = pool.map(initialize_tile, thacher_tiles)
-
-            # clean up
-            print("freeing `thacher_tiles`...")
-            del thacher_tiles
-            t2 = time.time()
-
-            print("\n********* start DEBUG ***********")
-            print("Thacher Tile initialization execution time: %s" % (t2 - t1))
-            print("********* end DEBUG ***********\n")
-
-            # Insert Tile/Healpix pixel relations
             tile_pixel_data = []
-            for t in initialized_thacher_tiles:
-                for p in t.enclosed_pixel_indices:
-                    tile_pixel_data.append((t.id, map_pixel_dict[p][0]))
+            if not self.options.skip_thacher:
+                ##### DO THACHER ######
+                # Get detector -> static tile rows
+                thacher_detector = query_db([select_detector_id % "THACHER"])[0][0]
+                thacher_id = thacher_detector[0]
+                thacher_static_tile_rows = query_db([tile_select % thacher_id])[0]
 
-            # Append to existing CSV, upload, and clean up CSV
-            try:
+                thacher_tiles = []
+                for r in thacher_static_tile_rows:
+                    t = Tile(float(r[3]), float(r[4]), float(thacher_detector[2]), float(thacher_detector[3]), map_nside)
+                    t.id = int(r[0])
+                    t.mwe = float(r[7])
+                    thacher_tiles.append(t)
+
+                # clean up
+                print("freeing `thacher_static_tile_rows`...")
+                del thacher_static_tile_rows
+
                 t1 = time.time()
-                print("Appending `%s`" % tile_pixel_upload_csv)
-                with open(tile_pixel_upload_csv, 'a') as csvfile:
-                    csvwriter = csv.writer(csvfile)
-                    for data in tile_pixel_data:
-                        csvwriter.writerow(data)
+                initialized_thacher_tiles = None
+                with mp.Pool() as pool:
+                    initialized_thacher_tiles = pool.map(initialize_tile, thacher_tiles)
 
+                # clean up
+                print("freeing `thacher_tiles`...")
+                del thacher_tiles
                 t2 = time.time()
+
                 print("\n********* start DEBUG ***********")
-                print("Tile-Pixel CSV append execution time: %s" % (t2 - t1))
+                print("Thacher Tile initialization execution time: %s" % (t2 - t1))
                 print("********* end DEBUG ***********\n")
-            except Error as e:
-                print("Error in creating Tile-Pixel CSV:\n")
-                print(e)
-                print("\nExiting")
-                return 1
+
+                # Insert Tile/Healpix pixel relations
+                for t in initialized_thacher_tiles:
+                    for p in t.enclosed_pixel_indices:
+                        tile_pixel_data.append((t.id, map_pixel_dict[p][0]))
+
+                # Append to existing CSV, upload, and clean up CSV
+                try:
+                    t1 = time.time()
+                    print("Appending `%s`" % tile_pixel_upload_csv)
+                    with open(tile_pixel_upload_csv, 'a') as csvfile:
+                        csvwriter = csv.writer(csvfile)
+                        for data in tile_pixel_data:
+                            csvwriter.writerow(data)
+
+                    t2 = time.time()
+                    print("\n********* start DEBUG ***********")
+                    print("Tile-Pixel CSV append execution time: %s" % (t2 - t1))
+                    print("********* end DEBUG ***********\n")
+                except Error as e:
+                    print("Error in creating Tile-Pixel CSV:\n")
+                    print(e)
+                    print("\nExiting")
+                    return 1
 
             print("Bulk uploading Tile-Pixel...")
             t1 = time.time()

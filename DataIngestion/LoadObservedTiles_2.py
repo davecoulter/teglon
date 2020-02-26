@@ -459,7 +459,7 @@ class Teglon:
             ebv = pickle.load(handle)
 
         # Get Map ID
-        healpix_map_select = "SELECT id, NSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
+        healpix_map_select = "SELECT id, RescaledNSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
         healpix_map_id = int(query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0])
         healpix_map_nside = int(
             query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][1])

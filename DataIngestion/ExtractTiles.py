@@ -498,17 +498,24 @@ class Teglon:
             is_error = True
             print("Invalid Galaxy band selection. Available bands: %s" % band_mapping.keys())
 
+        doSwope = True
         if self.options.s_exp_time <= 0.0:
-            is_error = True
-            print("Swope exposure time must be > 0.0 seconds")
+            doSwope = False
+            print("SKIPPING Swope!")
 
+        doThacher = True
         if self.options.t_exp_time <= 0.0:
-            is_error = True
-            print("Thacher exposure time must be > 0.0 seconds")
+            doThacher = False
+            print("SKIPPING Thacher!")
 
+        doGalaxies = True
         if self.options.g_exp_time <= 0.0:
+            doGalaxies = False
+            print("SKIPPING Galaxies!")
+
+        if not doSwope and not doThacher and not doGalaxies:
             is_error = True
-            print("Galaxy exposure time must be > 0.0 seconds")
+            print("Skipping all tile extractions!")
 
         if self.options.extinct <= 0.0:
             is_error = True
@@ -606,417 +613,312 @@ class Teglon:
             print("Exiting...")
             return 1
 
-        hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
-        s_band_name = band_mapping[self.options.s_band]
-        t_band_name = band_mapping[self.options.t_band]
-        g_band_name = band_mapping[self.options.g_band]
+        # region DB QUERIES
 
         # Get Map ID
-        healpix_map_select = "SELECT id, RescaledNSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
-        healpix_map_id = int(query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0])
+        healpix_map_select = "SELECT id FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
 
         band_select = "SELECT id, Name, F99_Coefficient FROM Band WHERE `Name`='%s'"
-        s_band_result = query_db([band_select % s_band_name])[0][0]
-        s_band_F99 = float(s_band_result[2])
-
-        t_band_result = query_db([band_select % t_band_name])[0][0]
-        t_band_F99 = float(t_band_result[2])
-
-        g_band_result = query_db([band_select % g_band_name])[0][0]
-        g_band_F99 = float(g_band_result[2])
-
-        SWOPE = "SWOPE"
-        THACHER = "THACHER"
-        GALAXY = self.options.galaxies_detector
-
         detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec FROM Detector WHERE Name='%s'"
-        s_detector_result = query_db([detector_select_by_name % SWOPE])[0][0]
-        s_detector_id = int(s_detector_result[0])
-        t_detector_result = query_db([detector_select_by_name % THACHER])[0][0]
-        t_detector_id = int(t_detector_result[0])
-        g_detector_result = query_db([detector_select_by_name % GALAXY])[0][0]
-        g_detector_min_dec = float(g_detector_result[6])
-        g_detector_max_dec = float(g_detector_result[7])
 
         # 4D NON-BOX QUERY
         # REPLACEMENT PARAMETERS: (band_F99, detector_id, healpix_map_id, self.options.cum_prob, band_F99,
         # self.options.extinct)
         tile_select_4D = '''
-        SELECT 
-            running_tile_prob.id as static_tile_id,  
-            st.FieldName, 
-            st.RA, 
-            st._Dec, 
-            running_tile_prob.net_prob, 
-            running_tile_prob.mean_pixel_dist, 
-            running_tile_prob.EBV*%s as A_lambda, 
-            running_tile_prob.cum_prob 
-        FROM 
-            (SELECT 
-                aggregate_tile.id, 
-                aggregate_tile.Detector_id, 
-                aggregate_tile.net_prob, 
-                aggregate_tile.mean_pixel_dist, 
-                aggregate_tile.EBV, 
-                SUM(aggregate_tile.net_prob) OVER(ORDER BY SUM(aggregate_tile.net_prob) DESC) AS cum_prob 
-             FROM 
-                (SELECT 
-                    st.id, 
-                    st.Detector_id, 
-                    SUM(hpc.NetPixelProb) as net_prob, 
-                    AVG(hp.Mean) as mean_pixel_dist, 
-                    sp_ebv.EBV 
+                SELECT 
+                    running_tile_prob.id as static_tile_id,  
+                    st.FieldName, 
+                    st.RA, 
+                    st._Dec, 
+                    running_tile_prob.net_prob, 
+                    running_tile_prob.mean_pixel_dist, 
+                    running_tile_prob.EBV*%s as A_lambda, 
+                    running_tile_prob.cum_prob 
                 FROM 
-                    StaticTile st 
-                JOIN StaticTile_HealpixPixel st_hp on st_hp.StaticTile_id = st.id 
-                JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = st_hp.HealpixPixel_id 
-                JOIN HealpixPixel hp on hp.id = hpc.HealpixPixel_id 
-                JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = st.N128_SkyPixel_id 
-                JOIN Detector d on d.id = st.Detector_id 
-                WHERE d.id = %s and hp.HealpixMap_id = %s 
-                GROUP BY 
-                    st.id, 
-                    st.Detector_id, 
-                    sp_ebv.EBV) aggregate_tile 
-            GROUP BY 
-                aggregate_tile.id, 
-                aggregate_tile.Detector_id, 
-                aggregate_tile.net_prob, 
-                aggregate_tile.mean_pixel_dist, 
-                aggregate_tile.EBV 
-            ORDER BY 
-                aggregate_tile.net_prob DESC) as running_tile_prob 
-        JOIN StaticTile st on st.id = running_tile_prob.id 
-        JOIN Detector d on d.id = running_tile_prob.Detector_id 
-        WHERE 
-            running_tile_prob.cum_prob <= %s AND 
-            running_tile_prob.EBV*%s <= %s AND 
-            st._Dec BETWEEN d.MinDec AND d.MaxDec 
-        ORDER BY 
-            running_tile_prob.net_prob DESC 
-        '''
+                    (SELECT 
+                        aggregate_tile.id, 
+                        aggregate_tile.Detector_id, 
+                        aggregate_tile.net_prob, 
+                        aggregate_tile.mean_pixel_dist, 
+                        aggregate_tile.EBV, 
+                        SUM(aggregate_tile.net_prob) OVER(ORDER BY SUM(aggregate_tile.net_prob) DESC) AS cum_prob 
+                     FROM 
+                        (SELECT 
+                            st.id, 
+                            st.Detector_id, 
+                            SUM(hpc.NetPixelProb) as net_prob, 
+                            AVG(hp.Mean) as mean_pixel_dist, 
+                            sp_ebv.EBV 
+                        FROM 
+                            StaticTile st 
+                        JOIN StaticTile_HealpixPixel st_hp on st_hp.StaticTile_id = st.id 
+                        JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = st_hp.HealpixPixel_id 
+                        JOIN HealpixPixel hp on hp.id = hpc.HealpixPixel_id 
+                        JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = st.N128_SkyPixel_id 
+                        JOIN Detector d on d.id = st.Detector_id 
+                        WHERE d.id = %s and hp.HealpixMap_id = %s 
+                        GROUP BY 
+                            st.id, 
+                            st.Detector_id, 
+                            sp_ebv.EBV) aggregate_tile 
+                    GROUP BY 
+                        aggregate_tile.id, 
+                        aggregate_tile.Detector_id, 
+                        aggregate_tile.net_prob, 
+                        aggregate_tile.mean_pixel_dist, 
+                        aggregate_tile.EBV 
+                    ORDER BY 
+                        aggregate_tile.net_prob DESC) as running_tile_prob 
+                JOIN StaticTile st on st.id = running_tile_prob.id 
+                JOIN Detector d on d.id = running_tile_prob.Detector_id 
+                WHERE 
+                    running_tile_prob.cum_prob <= %s AND 
+                    running_tile_prob.EBV*%s <= %s AND 
+                    st._Dec BETWEEN d.MinDec AND d.MaxDec 
+                ORDER BY 
+                    running_tile_prob.net_prob DESC 
+                '''
 
         # 2D NON-BOX QUERY
         # REPLACEMENT PARAMETERS: (band_F99, detector_id, healpix_map_id, self.options.cum_prob, band_F99,
         # self.options.extinct)
         tile_select_2D = '''
-        SELECT 
-            running_tile_prob.id as static_tile_id,  
-            st.FieldName, 
-            st.RA, 
-            st._Dec, 
-            running_tile_prob.net_prob, 
-            running_tile_prob.mean_pixel_dist, 
-            running_tile_prob.EBV*%s as A_lambda, 
-            running_tile_prob.cum_prob 
-        FROM 
-            (SELECT 
-                aggregate_tile.id, 
-                aggregate_tile.Detector_id, 
-                aggregate_tile.net_prob, 
-                aggregate_tile.mean_pixel_dist, 
-                aggregate_tile.EBV, 
-                SUM(aggregate_tile.net_prob) OVER(ORDER BY SUM(aggregate_tile.net_prob) DESC) AS cum_prob 
-             FROM 
-                (SELECT 
-                    st.id, 
-                    st.Detector_id, 
-                    SUM(hp.prob) as net_prob, 
-                    AVG(hp.Mean) as mean_pixel_dist, 
-                    sp_ebv.EBV 
+                SELECT 
+                    running_tile_prob.id as static_tile_id,  
+                    st.FieldName, 
+                    st.RA, 
+                    st._Dec, 
+                    running_tile_prob.net_prob, 
+                    running_tile_prob.mean_pixel_dist, 
+                    running_tile_prob.EBV*%s as A_lambda, 
+                    running_tile_prob.cum_prob 
                 FROM 
-                    StaticTile st 
-                JOIN StaticTile_HealpixPixel st_hp on st_hp.StaticTile_id = st.id  
-                JOIN HealpixPixel hp on hp.id = st_hp.HealpixPixel_id 
-                JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = st.N128_SkyPixel_id 
-                JOIN Detector d on d.id = st.Detector_id 
-                WHERE d.id = %s and hp.HealpixMap_id = %s 
-                GROUP BY 
-                    st.id, 
-                    st.Detector_id, 
-                    sp_ebv.EBV) aggregate_tile 
-            GROUP BY 
-                aggregate_tile.id, 
-                aggregate_tile.Detector_id, 
-                aggregate_tile.net_prob, 
-                aggregate_tile.mean_pixel_dist, 
-                aggregate_tile.EBV 
-            ORDER BY 
-                aggregate_tile.net_prob DESC) as running_tile_prob 
-        JOIN StaticTile st on st.id = running_tile_prob.id 
-        JOIN Detector d on d.id = running_tile_prob.Detector_id 
-        WHERE 
-            running_tile_prob.cum_prob <= %s AND 
-            running_tile_prob.EBV*%s <= %s AND 
-            st._Dec BETWEEN d.MinDec AND d.MaxDec 
-        ORDER BY 
-            running_tile_prob.net_prob DESC 
-    '''
+                    (SELECT 
+                        aggregate_tile.id, 
+                        aggregate_tile.Detector_id, 
+                        aggregate_tile.net_prob, 
+                        aggregate_tile.mean_pixel_dist, 
+                        aggregate_tile.EBV, 
+                        SUM(aggregate_tile.net_prob) OVER(ORDER BY SUM(aggregate_tile.net_prob) DESC) AS cum_prob 
+                     FROM 
+                        (SELECT 
+                            st.id, 
+                            st.Detector_id, 
+                            SUM(hp.prob) as net_prob, 
+                            AVG(hp.Mean) as mean_pixel_dist, 
+                            sp_ebv.EBV 
+                        FROM 
+                            StaticTile st 
+                        JOIN StaticTile_HealpixPixel st_hp on st_hp.StaticTile_id = st.id  
+                        JOIN HealpixPixel hp on hp.id = st_hp.HealpixPixel_id 
+                        JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = st.N128_SkyPixel_id 
+                        JOIN Detector d on d.id = st.Detector_id 
+                        WHERE d.id = %s and hp.HealpixMap_id = %s 
+                        GROUP BY 
+                            st.id, 
+                            st.Detector_id, 
+                            sp_ebv.EBV) aggregate_tile 
+                    GROUP BY 
+                        aggregate_tile.id, 
+                        aggregate_tile.Detector_id, 
+                        aggregate_tile.net_prob, 
+                        aggregate_tile.mean_pixel_dist, 
+                        aggregate_tile.EBV 
+                    ORDER BY 
+                        aggregate_tile.net_prob DESC) as running_tile_prob 
+                JOIN StaticTile st on st.id = running_tile_prob.id 
+                JOIN Detector d on d.id = running_tile_prob.Detector_id 
+                WHERE 
+                    running_tile_prob.cum_prob <= %s AND 
+                    running_tile_prob.EBV*%s <= %s AND 
+                    st._Dec BETWEEN d.MinDec AND d.MaxDec 
+                ORDER BY 
+                    running_tile_prob.net_prob DESC 
+            '''
 
         # 4D BOX QUERY
         # REPLACEMENT PARAMETERS: (band_F99, detector_id, healpix_map_id, self.options.cum_prob, band_F99,
         # self.options.extinct, s/t_min_ra, s/t_max_ra, s/t_min_dec, s/t_max_dec)
         box_tile_select_4D = '''
-        SELECT 
-            running_tile_prob.id as static_tile_id,  
-            st.FieldName, 
-            st.RA, 
-            st._Dec, 
-            running_tile_prob.net_prob, 
-            running_tile_prob.mean_pixel_dist, 
-            running_tile_prob.EBV*%s as A_lambda, 
-            running_tile_prob.cum_prob 
-        FROM 
-            (SELECT 
-                aggregate_tile.id, 
-                aggregate_tile.Detector_id, 
-                aggregate_tile.net_prob, 
-                aggregate_tile.mean_pixel_dist, 
-                aggregate_tile.EBV, 
-                SUM(aggregate_tile.net_prob) OVER(ORDER BY SUM(aggregate_tile.net_prob) DESC) AS cum_prob 
-             FROM 
-                (SELECT 
-                    st.id, 
-                    st.Detector_id, 
-                    SUM(hpc.NetPixelProb) as net_prob, 
-                    AVG(hp.Mean) as mean_pixel_dist, 
-                    sp_ebv.EBV 
+                SELECT 
+                    running_tile_prob.id as static_tile_id,  
+                    st.FieldName, 
+                    st.RA, 
+                    st._Dec, 
+                    running_tile_prob.net_prob, 
+                    running_tile_prob.mean_pixel_dist, 
+                    running_tile_prob.EBV*%s as A_lambda, 
+                    running_tile_prob.cum_prob 
                 FROM 
-                    StaticTile st 
-                JOIN StaticTile_HealpixPixel st_hp on st_hp.StaticTile_id = st.id 
-                JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = st_hp.HealpixPixel_id 
-                JOIN HealpixPixel hp on hp.id = hpc.HealpixPixel_id 
-                JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = st.N128_SkyPixel_id 
-                JOIN Detector d on d.id = st.Detector_id 
-                WHERE d.id = %s and hp.HealpixMap_id = %s 
-                GROUP BY 
-                    st.id, 
-                    st.Detector_id, 
-                    sp_ebv.EBV) aggregate_tile 
-            GROUP BY 
-                aggregate_tile.id, 
-                aggregate_tile.Detector_id, 
-                aggregate_tile.net_prob, 
-                aggregate_tile.mean_pixel_dist, 
-                aggregate_tile.EBV 
-            ORDER BY 
-                aggregate_tile.net_prob DESC) as running_tile_prob 
-        JOIN StaticTile st on st.id = running_tile_prob.id 
-        JOIN Detector d on d.id = running_tile_prob.Detector_id 
-        WHERE 
-            running_tile_prob.cum_prob <= %s AND 
-            running_tile_prob.EBV*%s <= %s AND  
-            st.RA BETWEEN %s AND %s AND 
-            st._Dec BETWEEN %s AND %s 
-        ORDER BY 
-            running_tile_prob.net_prob DESC 
-        '''
+                    (SELECT 
+                        aggregate_tile.id, 
+                        aggregate_tile.Detector_id, 
+                        aggregate_tile.net_prob, 
+                        aggregate_tile.mean_pixel_dist, 
+                        aggregate_tile.EBV, 
+                        SUM(aggregate_tile.net_prob) OVER(ORDER BY SUM(aggregate_tile.net_prob) DESC) AS cum_prob 
+                     FROM 
+                        (SELECT 
+                            st.id, 
+                            st.Detector_id, 
+                            SUM(hpc.NetPixelProb) as net_prob, 
+                            AVG(hp.Mean) as mean_pixel_dist, 
+                            sp_ebv.EBV 
+                        FROM 
+                            StaticTile st 
+                        JOIN StaticTile_HealpixPixel st_hp on st_hp.StaticTile_id = st.id 
+                        JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = st_hp.HealpixPixel_id 
+                        JOIN HealpixPixel hp on hp.id = hpc.HealpixPixel_id 
+                        JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = st.N128_SkyPixel_id 
+                        JOIN Detector d on d.id = st.Detector_id 
+                        WHERE d.id = %s and hp.HealpixMap_id = %s 
+                        GROUP BY 
+                            st.id, 
+                            st.Detector_id, 
+                            sp_ebv.EBV) aggregate_tile 
+                    GROUP BY 
+                        aggregate_tile.id, 
+                        aggregate_tile.Detector_id, 
+                        aggregate_tile.net_prob, 
+                        aggregate_tile.mean_pixel_dist, 
+                        aggregate_tile.EBV 
+                    ORDER BY 
+                        aggregate_tile.net_prob DESC) as running_tile_prob 
+                JOIN StaticTile st on st.id = running_tile_prob.id 
+                JOIN Detector d on d.id = running_tile_prob.Detector_id 
+                WHERE 
+                    running_tile_prob.cum_prob <= %s AND 
+                    running_tile_prob.EBV*%s <= %s AND  
+                    st.RA BETWEEN %s AND %s AND 
+                    st._Dec BETWEEN %s AND %s 
+                ORDER BY 
+                    running_tile_prob.net_prob DESC 
+                '''
 
         # 2D BOX QUERY
         # REPLACEMENT PARAMETERS: (band_F99, detector_id, healpix_map_id, self.options.cum_prob, band_F99,
         # self.options.extinct, s/t_min_ra, s/t_max_ra, s/t_min_dec, s/t_max_dec)
         box_tile_select_2D = '''
-        SELECT 
-            running_tile_prob.id as static_tile_id,  
-            st.FieldName, 
-            st.RA, 
-            st._Dec, 
-            running_tile_prob.net_prob, 
-            running_tile_prob.mean_pixel_dist, 
-            running_tile_prob.EBV*%s as A_lambda, 
-            running_tile_prob.cum_prob 
-        FROM 
-            (SELECT 
-                aggregate_tile.id, 
-                aggregate_tile.Detector_id, 
-                aggregate_tile.net_prob, 
-                aggregate_tile.mean_pixel_dist, 
-                aggregate_tile.EBV, 
-                SUM(aggregate_tile.net_prob) OVER(ORDER BY SUM(aggregate_tile.net_prob) DESC) AS cum_prob 
-             FROM 
-                (SELECT 
-                    st.id, 
-                    st.Detector_id, 
-                    SUM(hp.Prob) as net_prob, 
-                    AVG(hp.Mean) as mean_pixel_dist, 
-                    sp_ebv.EBV 
+                SELECT 
+                    running_tile_prob.id as static_tile_id,  
+                    st.FieldName, 
+                    st.RA, 
+                    st._Dec, 
+                    running_tile_prob.net_prob, 
+                    running_tile_prob.mean_pixel_dist, 
+                    running_tile_prob.EBV*%s as A_lambda, 
+                    running_tile_prob.cum_prob 
                 FROM 
-                    StaticTile st 
-                JOIN StaticTile_HealpixPixel st_hp on st_hp.StaticTile_id = st.id  
-                JOIN HealpixPixel hp on hp.id = st_hp.HealpixPixel_id 
-                JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = st.N128_SkyPixel_id 
-                JOIN Detector d on d.id = st.Detector_id 
-                WHERE d.id = %s and hp.HealpixMap_id = %s 
-                GROUP BY 
-                    st.id, 
-                    st.Detector_id, 
-                    sp_ebv.EBV) aggregate_tile 
-            GROUP BY 
-                aggregate_tile.id, 
-                aggregate_tile.Detector_id, 
-                aggregate_tile.net_prob, 
-                aggregate_tile.mean_pixel_dist, 
-                aggregate_tile.EBV 
-            ORDER BY 
-                aggregate_tile.net_prob DESC) as running_tile_prob 
-        JOIN StaticTile st on st.id = running_tile_prob.id 
-        JOIN Detector d on d.id = running_tile_prob.Detector_id 
-        WHERE 
-            running_tile_prob.cum_prob <= %s AND 
-            running_tile_prob.EBV*%s <= %s AND  
-            st.RA BETWEEN %s AND %s AND 
-            st._Dec BETWEEN %s AND %s 
-        ORDER BY 
-            running_tile_prob.net_prob DESC 
-        '''
+                    (SELECT 
+                        aggregate_tile.id, 
+                        aggregate_tile.Detector_id, 
+                        aggregate_tile.net_prob, 
+                        aggregate_tile.mean_pixel_dist, 
+                        aggregate_tile.EBV, 
+                        SUM(aggregate_tile.net_prob) OVER(ORDER BY SUM(aggregate_tile.net_prob) DESC) AS cum_prob 
+                     FROM 
+                        (SELECT 
+                            st.id, 
+                            st.Detector_id, 
+                            SUM(hp.Prob) as net_prob, 
+                            AVG(hp.Mean) as mean_pixel_dist, 
+                            sp_ebv.EBV 
+                        FROM 
+                            StaticTile st 
+                        JOIN StaticTile_HealpixPixel st_hp on st_hp.StaticTile_id = st.id  
+                        JOIN HealpixPixel hp on hp.id = st_hp.HealpixPixel_id 
+                        JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = st.N128_SkyPixel_id 
+                        JOIN Detector d on d.id = st.Detector_id 
+                        WHERE d.id = %s and hp.HealpixMap_id = %s 
+                        GROUP BY 
+                            st.id, 
+                            st.Detector_id, 
+                            sp_ebv.EBV) aggregate_tile 
+                    GROUP BY 
+                        aggregate_tile.id, 
+                        aggregate_tile.Detector_id, 
+                        aggregate_tile.net_prob, 
+                        aggregate_tile.mean_pixel_dist, 
+                        aggregate_tile.EBV 
+                    ORDER BY 
+                        aggregate_tile.net_prob DESC) as running_tile_prob 
+                JOIN StaticTile st on st.id = running_tile_prob.id 
+                JOIN Detector d on d.id = running_tile_prob.Detector_id 
+                WHERE 
+                    running_tile_prob.cum_prob <= %s AND 
+                    running_tile_prob.EBV*%s <= %s AND  
+                    st.RA BETWEEN %s AND %s AND 
+                    st._Dec BETWEEN %s AND %s 
+                ORDER BY 
+                    running_tile_prob.net_prob DESC 
+                '''
 
         # GALAXIES SELECT
         # REPLACEMENT PARAMETERS: (band_F99, healpix_map_id, band_F99, self.options.extinct, g_detector_min_dec,
         # g_detector_max_dec)
         galaxies_select = '''
-        SELECT 
-            gd2.id, 
-            gd2.Name_GWGC, 
-            gd2.Name_HyperLEDA, 
-            gd2.Name_2MASS, 
-            gd2.RA, 
-            gd2._Dec, 
-            gd2.z_dist, 
-            gd2.B, 
-            gd2.K, 
-            hp_gd2_w.GalaxyProb, 
-            sp_ebv.EBV*%s AS A_lambda 
-        FROM 
-            GalaxyDistance2 gd2 
-        JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
-        JOIN HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
-        JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp_gd2.HealpixPixel_id 
-        JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
-        JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = hp.N128_SkyPixel_id 
-        WHERE 
-            hpc.HealpixMap_id = %s AND 
-            sp_ebv.EBV*%s <= %s AND 
-            gd2._Dec BETWEEN %s AND %s 
-        '''
+                SELECT 
+                    gd2.id, 
+                    gd2.Name_GWGC, 
+                    gd2.Name_HyperLEDA, 
+                    gd2.Name_2MASS, 
+                    gd2.RA, 
+                    gd2._Dec, 
+                    gd2.z_dist, 
+                    gd2.B, 
+                    gd2.K, 
+                    hp_gd2_w.GalaxyProb, 
+                    sp_ebv.EBV*%s AS A_lambda 
+                FROM 
+                    GalaxyDistance2 gd2 
+                JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
+                JOIN HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
+                JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp_gd2.HealpixPixel_id 
+                JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
+                JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = hp.N128_SkyPixel_id 
+                WHERE 
+                    hpc.HealpixMap_id = %s AND 
+                    sp_ebv.EBV*%s <= %s AND 
+                    gd2._Dec BETWEEN %s AND %s 
+                '''
 
         # GALAXIES SELECT
         # REPLACEMENT PARAMETERS: (band_F99, healpix_map_id, band_F99, self.options.extinct, g_min_ra, g_max_ra,
         # g_min_dec, g_max_dec)
         box_galaxies_select = '''
-        SELECT 
-            gd2.id, 
-            gd2.Name_GWGC, 
-            gd2.Name_HyperLEDA, 
-            gd2.Name_2MASS, 
-            gd2.RA, 
-            gd2._Dec, 
-            gd2.z_dist, 
-            gd2.B, 
-            gd2.K, 
-            hp_gd2_w.GalaxyProb, 
-            sp_ebv.EBV*%s AS A_lambda 
-        FROM 
-            GalaxyDistance2 gd2 
-        JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
-        JOIN HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
-        JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp_gd2.HealpixPixel_id 
-        JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
-        JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = hp.N128_SkyPixel_id 
-        WHERE 
-            hpc.HealpixMap_id = %s AND 
-            sp_ebv.EBV*%s <= %s AND 
-            gd2.RA BETWEEN %s AND %s AND 
-            gd2._Dec BETWEEN %s AND %s 
-        '''
+                SELECT 
+                    gd2.id, 
+                    gd2.Name_GWGC, 
+                    gd2.Name_HyperLEDA, 
+                    gd2.Name_2MASS, 
+                    gd2.RA, 
+                    gd2._Dec, 
+                    gd2.z_dist, 
+                    gd2.B, 
+                    gd2.K, 
+                    hp_gd2_w.GalaxyProb, 
+                    sp_ebv.EBV*%s AS A_lambda 
+                FROM 
+                    GalaxyDistance2 gd2 
+                JOIN HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
+                JOIN HealpixPixel_GalaxyDistance2_Weight hp_gd2_w on hp_gd2_w.HealpixPixel_GalaxyDistance2_id = hp_gd2.id 
+                JOIN HealpixPixel_Completeness hpc on hpc.HealpixPixel_id = hp_gd2.HealpixPixel_id 
+                JOIN HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
+                JOIN SkyPixel_EBV sp_ebv on sp_ebv.N128_SkyPixel_id = hp.N128_SkyPixel_id 
+                WHERE 
+                    hpc.HealpixMap_id = %s AND 
+                    sp_ebv.EBV*%s <= %s AND 
+                    gd2.RA BETWEEN %s AND %s AND 
+                    gd2._Dec BETWEEN %s AND %s 
+                '''
 
-        box_file_formatter = "%s/%s_%s_%s_%s_box.csv"
-        non_box_file_formatter = "%s/%s_%s_%s_%s.csv"
-        box_galaxies_formatter = "%s/%s_%s_box.csv"
-        non_box_galaxies_formatter = "%s/%s_%s.csv"
+        # endregion
 
-        s_formatted_output_path = ""
-        t_formatted_output_path = ""
-        g_formatted_output_path = ""
-        r_formatted_output_path = "%s/%s_%s.reg" % (formatted_healpix_dir, "REGION",
-                                                    self.options.healpix_file.replace(",", "_"))
-        g_select_to_execute = ""
-        s_select_to_execute = ""
-        t_select_to_execute = ""
+        SWOPE = "SWOPE"
+        THACHER = "THACHER"
+        GALAXY = self.options.galaxies_detector
 
-        if is_Galaxy_box_query:
-            g_formatted_output_path = box_galaxies_formatter % (formatted_healpix_dir, "GALAXIES",
-                                                                       self.options.healpix_file.replace(",", "_"))
-            # (f99, healpix_map_id, f99, extinct, ra1, ra2, dec1, dec2)
-            g_select_to_execute = box_galaxies_select % (g_band_F99, healpix_map_id, g_band_F99, self.options.extinct,
-                                                         self.options.g_min_ra, self.options.g_max_ra,
-                                                         self.options.g_min_dec, self.options.g_max_dec)
-        else:
-            g_formatted_output_path = non_box_galaxies_formatter % (formatted_healpix_dir, "GALAXIES",
-                                                                       self.options.healpix_file.replace(",", "_"))
-            # (f99, healpix_mpa_id, f99, extinction, min_dec, max_dec)
-            g_select_to_execute = galaxies_select % (g_band_F99, healpix_map_id, g_band_F99, self.options.extinct,
-                                                     g_detector_min_dec, g_detector_max_dec)
-
-        if is_Swope_box_query:
-            s_formatted_output_path = box_file_formatter % (formatted_healpix_dir, SWOPE, self.options.prob_type,
-                                                            self.options.s_cum_prob,
-                                                            self.options.healpix_file.replace(",", "_"))
-            if self.options.prob_type == _4D:
-                s_select_to_execute = box_tile_select_4D % (s_band_F99, s_detector_id, healpix_map_id,
-                                                            self.options.s_cum_prob, s_band_F99, self.options.extinct,
-                                                            self.options.s_min_ra, self.options.s_max_ra,
-                                                            self.options.s_min_dec, self.options.s_max_dec)
-            else:
-                s_select_to_execute = box_tile_select_2D % (s_band_F99, s_detector_id, healpix_map_id,
-                                                            self.options.s_cum_prob, s_band_F99, self.options.extinct,
-                                                            self.options.s_min_ra, self.options.s_max_ra,
-                                                            self.options.s_min_dec, self.options.s_max_dec)
-        else:
-            s_formatted_output_path = non_box_file_formatter % (formatted_healpix_dir, SWOPE, self.options.prob_type,
-                                                                self.options.s_cum_prob,
-                                                                self.options.healpix_file.replace(",", "_"))
-            if self.options.prob_type == _4D:
-                s_select_to_execute = tile_select_4D % (s_band_F99, s_detector_id, healpix_map_id,
-                                                        self.options.s_cum_prob, s_band_F99, self.options.extinct)
-            else:
-                s_select_to_execute = tile_select_2D % (s_band_F99, s_detector_id, healpix_map_id,
-                                                        self.options.s_cum_prob, s_band_F99, self.options.extinct)
-
-        if is_Thacher_box_query:
-            t_formatted_output_path = box_file_formatter % (formatted_healpix_dir, THACHER, self.options.prob_type,
-                                                            self.options.t_cum_prob,
-                                                            self.options.healpix_file.replace(",", "_"))
-            if self.options.prob_type == _4D:
-                t_select_to_execute = box_tile_select_4D % (t_band_F99, t_detector_id, healpix_map_id,
-                                                            self.options.t_cum_prob, t_band_F99, self.options.extinct,
-                                                            self.options.t_min_ra, self.options.t_max_ra,
-                                                            self.options.t_min_dec, self.options.t_max_dec)
-            else:
-                t_select_to_execute = box_tile_select_2D % (t_band_F99, t_detector_id, healpix_map_id,
-                                                            self.options.t_cum_prob, t_band_F99, self.options.extinct,
-                                                            self.options.t_min_ra, self.options.t_max_ra,
-                                                            self.options.t_min_dec, self.options.t_max_dec)
-        else:
-            t_formatted_output_path = non_box_file_formatter % (formatted_healpix_dir, THACHER, self.options.prob_type,
-                                                                self.options.t_cum_prob,
-                                                                self.options.healpix_file.replace(",", "_"))
-            if self.options.prob_type == _4D:
-                t_select_to_execute = tile_select_4D % (t_band_F99, t_detector_id, healpix_map_id,
-                                                        self.options.t_cum_prob, t_band_F99, self.options.extinct)
-            else:
-                t_select_to_execute = tile_select_2D % (t_band_F99, t_detector_id, healpix_map_id,
-                                                        self.options.t_cum_prob, t_band_F99, self.options.extinct)
-
-        s_tile_result = query_db([s_select_to_execute])[0]
-        t_tile_result = query_db([t_select_to_execute])[0]
-        galaxies_result = query_db([g_select_to_execute])[0]
-
-        # Sort/limit galaxies_result
-        sorted_galaxies_result = sorted(galaxies_result, key=lambda x: float(x[9]), reverse=True)
-        galaxies_to_write = []
-        if self.options.num_gal > 0:
-            galaxies_to_write = sorted_galaxies_result[0:self.options.num_gal]
-
+        # Function used in serializing output
         def GetSexigesimalString(c):
             ra = c.ra.hms
             dec = c.dec.dms
@@ -1032,151 +934,278 @@ class Teglon:
                 dec_string = "-00:%02d:%05.2f" % (np.abs(dec[1]), np.abs(dec[2]))
             return (ra_string, dec_string)
 
+        hpx_path = "%s/%s" % (formatted_healpix_dir, self.options.healpix_file)
+        s_band_name = band_mapping[self.options.s_band]
+        t_band_name = band_mapping[self.options.t_band]
+        g_band_name = band_mapping[self.options.g_band]
+
+        healpix_map_id = int(query_db([healpix_map_select % (self.options.gw_id, self.options.healpix_file)])[0][0][0])
+
         # E.g. Non box:
         #   <directory>/SWOPE_4D_0.9_LALInference_0.fits.gz.csv
         # Box:
         #   <directory>/SWOPE_2D_0.8_bayestar.fits.gz_box.csv
+        box_file_formatter = "%s/%s_%s_%s_%s_box.csv"
+        non_box_file_formatter = "%s/%s_%s_%s_%s.csv"
+        box_galaxies_formatter = "%s/%s_%s_box.csv"
+        non_box_galaxies_formatter = "%s/%s_%s.csv"
 
+        s_formatted_output_path = ""
+        t_formatted_output_path = ""
+        g_formatted_output_path = ""
+        r_formatted_output_path = "%s/%s_%s.reg" % (formatted_healpix_dir, "REGION",
+                                                    self.options.healpix_file.replace(",", "_"))
 
-        with open(s_formatted_output_path, 'w') as csvfile:
-            csvwriter = csv.writer(csvfile)
+        if doSwope:
+            print("Extracting Swope...")
+            s_detector_result = query_db([detector_select_by_name % SWOPE])[0][0]
+            s_detector_id = int(s_detector_result[0])
 
-            cols = []
-            cols.append('# FieldName')
-            cols.append('FieldRA')
-            cols.append('FieldDec')
-            cols.append('Telscope')
-            cols.append('Filter')
-            cols.append('ExpTime')
-            cols.append('Priority')
-            cols.append('Status')
-            csvwriter.writerow(cols)
+            s_band_result = query_db([band_select % s_band_name])[0][0]
+            s_band_F99 = float(s_band_result[2])
 
-            for i, row in enumerate(s_tile_result):
-                c = coord.SkyCoord(row[2], row[3], unit=(u.deg, u.deg))
-                coord_str = GetSexigesimalString(c)
+            s_select_to_execute = ""
+            if is_Swope_box_query:
+                s_formatted_output_path = box_file_formatter % (formatted_healpix_dir, SWOPE, self.options.prob_type,
+                                                                self.options.s_cum_prob,
+                                                                self.options.healpix_file.replace(",", "_"))
+                if self.options.prob_type == _4D:
+                    s_select_to_execute = box_tile_select_4D % (s_band_F99, s_detector_id, healpix_map_id,
+                                                                self.options.s_cum_prob, s_band_F99,
+                                                                self.options.extinct,
+                                                                self.options.s_min_ra, self.options.s_max_ra,
+                                                                self.options.s_min_dec, self.options.s_max_dec)
+                else:
+                    s_select_to_execute = box_tile_select_2D % (s_band_F99, s_detector_id, healpix_map_id,
+                                                                self.options.s_cum_prob, s_band_F99,
+                                                                self.options.extinct,
+                                                                self.options.s_min_ra, self.options.s_max_ra,
+                                                                self.options.s_min_dec, self.options.s_max_dec)
+            else:
+                s_formatted_output_path = non_box_file_formatter % (
+                formatted_healpix_dir, SWOPE, self.options.prob_type,
+                self.options.s_cum_prob,
+                self.options.healpix_file.replace(",", "_"))
+                if self.options.prob_type == _4D:
+                    s_select_to_execute = tile_select_4D % (s_band_F99, s_detector_id, healpix_map_id,
+                                                            self.options.s_cum_prob, s_band_F99, self.options.extinct)
+                else:
+                    s_select_to_execute = tile_select_2D % (s_band_F99, s_detector_id, healpix_map_id,
+                                                            self.options.s_cum_prob, s_band_F99, self.options.extinct)
 
-                cols = []
+            s_tile_result = query_db([s_select_to_execute])[0]
 
-                cols.append(row[1])
-                cols.append(coord_str[0])
-                cols.append(coord_str[1])
-                cols.append(SWOPE)
-                cols.append(self.options.s_band)
-                cols.append(str(self.options.s_exp_time))
-                cols.append(row[4])
-                cols.append('False')
-                csvwriter.writerow(cols)
-
-            print("Done writing out %s" % SWOPE)
-
-        with open(t_formatted_output_path, 'w') as csvfile:
-            csvwriter = csv.writer(csvfile)
-
-            cols = []
-            cols.append('# FieldName')
-            cols.append('FieldRA')
-            cols.append('FieldDec')
-            cols.append('Telscope')
-            cols.append('Filter')
-            cols.append('ExpTime')
-            cols.append('Priority')
-            cols.append('Status')
-            csvwriter.writerow(cols)
-
-            for i, row in enumerate(t_tile_result):
-                c = coord.SkyCoord(row[2], row[3], unit=(u.deg, u.deg))
-                coord_str = GetSexigesimalString(c)
-
-                cols = []
-
-                cols.append(row[1])
-                cols.append(coord_str[0])
-                cols.append(coord_str[1])
-                cols.append(THACHER)
-                cols.append(self.options.t_band)
-                cols.append(str(self.options.t_exp_time))
-                cols.append(row[4])
-                cols.append('False')
-                csvwriter.writerow(cols)
-
-            print("Done writing out %s" % THACHER)
-
-        with open(g_formatted_output_path,'w') as csvfile:
-
-            csvwriter = csv.writer(csvfile)
-
-            cols = []
-            cols.append('# FieldName')
-            cols.append('FieldRA')
-            cols.append('FieldDec')
-            cols.append('Telscope')
-            cols.append('Filter')
-            cols.append('ExpTime')
-            cols.append('Priority')
-            cols.append('Status')
-            csvwriter.writerow(cols)
-
-            for i, row in enumerate(galaxies_to_write):
-
-                c = coord.SkyCoord(row[4], row[5], unit=(u.deg, u.deg))
-                coord_str = GetSexigesimalString(c)
+            with open(s_formatted_output_path, 'w') as csvfile:
+                csvwriter = csv.writer(csvfile)
 
                 cols = []
-
-                Name_GWGC = row[1]
-                Name_HyperLEDA = row[2]
-                Name_2MASS = row[3]
-
-                field_name = ""
-                if Name_GWGC is not None:
-                    field_name = Name_GWGC
-                elif Name_HyperLEDA is not None:
-                    field_name = "LEDA" + Name_HyperLEDA
-                elif Name_2MASS is not None:
-                    field_name = Name_2MASS
-
-                if field_name == "":
-                    raise("No field name!")
-
-                cols.append(field_name)
-                cols.append(coord_str[0])
-                cols.append(coord_str[1])
-                cols.append(GALAXY)
-                cols.append(self.options.g_band)
-                cols.append(str(self.options.g_exp_time))
-                cols.append(row[9])
-                cols.append('False')
+                cols.append('# FieldName')
+                cols.append('FieldRA')
+                cols.append('FieldDec')
+                cols.append('Telscope')
+                cols.append('Filter')
+                cols.append('ExpTime')
+                cols.append('Priority')
+                cols.append('Status')
                 csvwriter.writerow(cols)
 
-            print("Done w/ Galaxies")
+                for i, row in enumerate(s_tile_result):
+                    c = coord.SkyCoord(row[2], row[3], unit=(u.deg, u.deg))
+                    coord_str = GetSexigesimalString(c)
 
-        with open(r_formatted_output_path,'w') as csvfile:
+                    cols = []
 
-            csvfile.write("# Region file format: DS9 version 4.0 global\n\n")
-            csvfile.write("global color=lightgreen\n")
-            csvfile.write("ICRS\n")
+                    cols.append(row[1])
+                    cols.append(coord_str[0])
+                    cols.append(coord_str[1])
+                    cols.append(SWOPE)
+                    cols.append(self.options.s_band)
+                    cols.append(str(self.options.s_exp_time))
+                    cols.append(row[4])
+                    cols.append('False')
+                    csvwriter.writerow(cols)
 
-            for i, row in enumerate(galaxies_to_write):
+                print("Done writing out %s" % SWOPE)
 
-                Name_GWGC = row[1]
-                Name_HyperLEDA = row[2]
-                Name_2MASS = row[3]
+        if doThacher:
+            print("Extracting Thacher...")
+            t_detector_result = query_db([detector_select_by_name % THACHER])[0][0]
+            t_detector_id = int(t_detector_result[0])
 
-                field_name = ""
-                if Name_GWGC is not None:
-                    field_name = Name_GWGC
-                elif Name_HyperLEDA is not None:
-                    field_name = "LEDA" + Name_HyperLEDA
-                elif Name_2MASS is not None:
-                    field_name = Name_2MASS
+            t_band_result = query_db([band_select % t_band_name])[0][0]
+            t_band_F99 = float(t_band_result[2])
 
-                if field_name == "":
-                    raise("No field name!")
+            t_select_to_execute = ""
+            if is_Thacher_box_query:
+                t_formatted_output_path = box_file_formatter % (formatted_healpix_dir, THACHER, self.options.prob_type,
+                                                                self.options.t_cum_prob,
+                                                                self.options.healpix_file.replace(",", "_"))
+                if self.options.prob_type == _4D:
+                    t_select_to_execute = box_tile_select_4D % (t_band_F99, t_detector_id, healpix_map_id,
+                                                                self.options.t_cum_prob, t_band_F99,
+                                                                self.options.extinct,
+                                                                self.options.t_min_ra, self.options.t_max_ra,
+                                                                self.options.t_min_dec, self.options.t_max_dec)
+                else:
+                    t_select_to_execute = box_tile_select_2D % (t_band_F99, t_detector_id, healpix_map_id,
+                                                                self.options.t_cum_prob, t_band_F99,
+                                                                self.options.extinct,
+                                                                self.options.t_min_ra, self.options.t_max_ra,
+                                                                self.options.t_min_dec, self.options.t_max_dec)
+            else:
+                t_formatted_output_path = non_box_file_formatter % (
+                formatted_healpix_dir, THACHER, self.options.prob_type,
+                self.options.t_cum_prob,
+                self.options.healpix_file.replace(",", "_"))
+                if self.options.prob_type == _4D:
+                    t_select_to_execute = tile_select_4D % (t_band_F99, t_detector_id, healpix_map_id,
+                                                            self.options.t_cum_prob, t_band_F99, self.options.extinct)
+                else:
+                    t_select_to_execute = tile_select_2D % (t_band_F99, t_detector_id, healpix_map_id,
+                                                            self.options.t_cum_prob, t_band_F99, self.options.extinct)
 
-                csvfile.write('circle(%s,%s,120") # width=4 text="%s"\n' % (row[4], row[5], field_name))
+            t_tile_result = query_db([t_select_to_execute])[0]
 
-            print("Done w/ Region File")
+            with open(t_formatted_output_path, 'w') as csvfile:
+                csvwriter = csv.writer(csvfile)
+
+                cols = []
+                cols.append('# FieldName')
+                cols.append('FieldRA')
+                cols.append('FieldDec')
+                cols.append('Telscope')
+                cols.append('Filter')
+                cols.append('ExpTime')
+                cols.append('Priority')
+                cols.append('Status')
+                csvwriter.writerow(cols)
+
+                for i, row in enumerate(t_tile_result):
+                    c = coord.SkyCoord(row[2], row[3], unit=(u.deg, u.deg))
+                    coord_str = GetSexigesimalString(c)
+
+                    cols = []
+
+                    cols.append(row[1])
+                    cols.append(coord_str[0])
+                    cols.append(coord_str[1])
+                    cols.append(THACHER)
+                    cols.append(self.options.t_band)
+                    cols.append(str(self.options.t_exp_time))
+                    cols.append(row[4])
+                    cols.append('False')
+                    csvwriter.writerow(cols)
+
+                print("Done writing out %s" % THACHER)
+
+        if doGalaxies:
+            print("Extracting Galaxies for %s..." % GALAXY)
+            g_detector_result = query_db([detector_select_by_name % GALAXY])[0][0]
+            g_detector_min_dec = float(g_detector_result[6])
+            g_detector_max_dec = float(g_detector_result[7])
+
+            g_band_result = query_db([band_select % g_band_name])[0][0]
+            g_band_F99 = float(g_band_result[2])
+
+            g_select_to_execute = ""
+            if is_Galaxy_box_query:
+                g_formatted_output_path = box_galaxies_formatter % (formatted_healpix_dir, "GALAXIES",
+                                                                    self.options.healpix_file.replace(",", "_"))
+                # (f99, healpix_map_id, f99, extinct, ra1, ra2, dec1, dec2)
+                g_select_to_execute = box_galaxies_select % (
+                g_band_F99, healpix_map_id, g_band_F99, self.options.extinct,
+                self.options.g_min_ra, self.options.g_max_ra,
+                self.options.g_min_dec, self.options.g_max_dec)
+            else:
+                g_formatted_output_path = non_box_galaxies_formatter % (formatted_healpix_dir, "GALAXIES",
+                                                                        self.options.healpix_file.replace(",", "_"))
+                # (f99, healpix_mpa_id, f99, extinction, min_dec, max_dec)
+                g_select_to_execute = galaxies_select % (g_band_F99, healpix_map_id, g_band_F99, self.options.extinct,
+                                                         g_detector_min_dec, g_detector_max_dec)
+
+            galaxies_result = query_db([g_select_to_execute])[0]
+
+            # Sort/limit galaxies_result
+            sorted_galaxies_result = sorted(galaxies_result, key=lambda x: float(x[9]), reverse=True)
+            galaxies_to_write = []
+            if self.options.num_gal > 0:
+                galaxies_to_write = sorted_galaxies_result[0:self.options.num_gal]
+
+            with open(g_formatted_output_path, 'w') as csvfile:
+
+                csvwriter = csv.writer(csvfile)
+
+                cols = []
+                cols.append('# FieldName')
+                cols.append('FieldRA')
+                cols.append('FieldDec')
+                cols.append('Telscope')
+                cols.append('Filter')
+                cols.append('ExpTime')
+                cols.append('Priority')
+                cols.append('Status')
+                csvwriter.writerow(cols)
+
+                for i, row in enumerate(galaxies_to_write):
+
+                    c = coord.SkyCoord(row[4], row[5], unit=(u.deg, u.deg))
+                    coord_str = GetSexigesimalString(c)
+
+                    cols = []
+
+                    Name_GWGC = row[1]
+                    Name_HyperLEDA = row[2]
+                    Name_2MASS = row[3]
+
+                    field_name = ""
+                    if Name_GWGC is not None:
+                        field_name = Name_GWGC
+                    elif Name_HyperLEDA is not None:
+                        field_name = "LEDA" + Name_HyperLEDA
+                    elif Name_2MASS is not None:
+                        field_name = Name_2MASS
+
+                    if field_name == "":
+                        raise ("No field name!")
+
+                    cols.append(field_name)
+                    cols.append(coord_str[0])
+                    cols.append(coord_str[1])
+                    cols.append(GALAXY)
+                    cols.append(self.options.g_band)
+                    cols.append(str(self.options.g_exp_time))
+                    cols.append(row[9])
+                    cols.append('False')
+                    csvwriter.writerow(cols)
+
+                print("Done w/ Galaxies")
+
+            with open(r_formatted_output_path, 'w') as csvfile:
+
+                csvfile.write("# Region file format: DS9 version 4.0 global\n\n")
+                csvfile.write("global color=lightgreen\n")
+                csvfile.write("ICRS\n")
+
+                for i, row in enumerate(galaxies_to_write):
+
+                    Name_GWGC = row[1]
+                    Name_HyperLEDA = row[2]
+                    Name_2MASS = row[3]
+
+                    field_name = ""
+                    if Name_GWGC is not None:
+                        field_name = Name_GWGC
+                    elif Name_HyperLEDA is not None:
+                        field_name = "LEDA" + Name_HyperLEDA
+                    elif Name_2MASS is not None:
+                        field_name = Name_2MASS
+
+                    if field_name == "":
+                        raise ("No field name!")
+
+                    csvfile.write('circle(%s,%s,120") # width=4 text="%s"\n' % (row[4], row[5], field_name))
+
+                print("Done w/ Region File")
 
         t2 = time.time()
         print("\n********* start DEBUG ***********")
@@ -1200,6 +1229,8 @@ python ExtractTiles.py   --gw_id <gw id> --healpix_file <file name>
                     --t_band r --t_exp_time 120 --t_cum_prob 0.75 
                     --t_min_ra 90.0 --t_max_ra 115.0 --t_min_dec -20.0 --t_max_dec 90.0 
                     --extinct 0.5 --prob_type 4D
+                    
+NOTE: Passing s_/t_/g_exp_time <= 0 will SKIP that extraction!
 """
     start = time.time()
 
