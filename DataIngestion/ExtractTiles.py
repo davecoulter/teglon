@@ -339,13 +339,13 @@ class Teglon:
                           help='Filter for Galaxies extract to use for extinction calculation. Default: `r`. Available: (g, r, i)')
 
         parser.add_option('--s_exp_time', default="60.0", type="float",
-                          help='Exposure time (seconds) to write out for Swope. Default: `60.0`. Must be > 0.0')
+                          help='Exposure time (seconds) to write out for Swope. Default: `60.0`; if <= 0.0, skip telescope')
 
         parser.add_option('--t_exp_time', default="120.0", type="float",
-                          help='Exposure time (seconds) to write out for Thacher. Default: `120.0`. Must be > 0.0')
+                          help='Exposure time (seconds) to write out for Thacher. Default: `120.0`; if <= 0.0, skip telescope')
 
         parser.add_option('--g_exp_time', default="120.0", type="float",
-                          help='Exposure time (seconds) to write out for Galaxies. Default: `120.0`. Must be > 0.0')
+                          help='Exposure time (seconds) to write out for Galaxies. Default: `120.0`; if <= 0.0, skip galaxies')
 
         parser.add_option('--extinct', default="0.5", type="float",
                           help='Extinction in mags in the specified band(s) to be less than. Default: 0.5 mag. Must be > 0.0')

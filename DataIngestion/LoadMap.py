@@ -359,21 +359,21 @@ class Teglon:
                           help='LIGO superevent name, e.g. `S190425z` ')
 
         parser.add_option('--healpix_dir', default='../Events/{GWID}', type="str",
-                          help='Directory for where to look for the healpix file.')
+                          help='Directory for where to look for the healpix file (Default = ../Events/{GWID})')
 
         parser.add_option('--healpix_file', default="", type="str", help='healpix filename')
 
         parser.add_option('--orig_res', action="store_true", default=False,
-                          help='''Upload the healpix file at the native resolution (default is NSIDE = 256)''')
+                          help='''Upload the healpix file at the native resolution (Default = False)''')
 
         parser.add_option('--load_local_file', action="store_true", default=False,
-                          help='''Circumvent downloading map and load map from disk''')
+                          help='''Circumvent downloading map and load map from disk (Default = False)''')
 
         parser.add_option('--skip_swope', action="store_true", default=False,
-                          help='''Do not register Swope tiles for this map''')
+                          help='''Do not register Swope tiles for this map (Default = False)''')
 
         parser.add_option('--skip_thacher', action="store_true", default=False,
-                          help='''Do not register Thacher tiles for this map''')
+                          help='''Do not register Thacher tiles for this map (Default = False)''')
 
         return (parser)
 
