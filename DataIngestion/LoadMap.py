@@ -91,14 +91,6 @@ db_pwd = db_config.get('database', 'DATABASE_PASSWORD')
 db_host = db_config.get('database', 'DATABASE_HOST')
 db_port = db_config.get('database', 'DATABASE_PORT')
 
-isDEBUG = False
-build_map = True
-build_pixels = True
-build_tile_pixel_relation = True
-build_galaxy_pixel_relation = True
-build_completeness_func = True
-build_galaxy_weights = True
-
 # Database SELECT
 # For every sub-query, the iterable result is appended to a master list of results
 def bulk_upload(query):
@@ -379,6 +371,14 @@ class Teglon:
 
     def main(self):
 
+        isDEBUG = False
+        build_map = True
+        build_pixels = True
+        build_tile_pixel_relation = True
+        build_galaxy_pixel_relation = True
+        build_completeness_func = True
+        build_galaxy_weights = True
+
         healpix_map_select = "SELECT id, NSIDE FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
 
         is_error = False
@@ -417,7 +417,9 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
             print("**** Not registering Thacher tiles for this event! ****")
 
         # Only build tile-pixel relations if we don't skip both Swope AND Thacher
-        build_tile_pixel_relation = self.options.skip_swope or self.options.skip_thacher
+        if self.options.skip_swope and self.options.skip_thacher:
+            build_tile_pixel_relation = False
+
         if not build_tile_pixel_relation:
             print("**** Skipping tile-pixel relations entirely! ****")
 
