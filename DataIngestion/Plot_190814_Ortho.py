@@ -370,25 +370,25 @@ class Teglon:
 
         # Get all observed tiles for all configured detectors
         observed_tile_select = '''
-			SELECT 
-				id,
-				Detector_id, 
-				FieldName, 
-				RA, 
-				_Dec, 
-				EBV, 
-				N128_SkyPixel_id, 
-				Band_id, 
-				MJD, 
-				Exp_Time, 
-				Mag_Lim, 
-				HealpixMap_id 
-			FROM
-				ObservedTile 
-			WHERE
-				HealpixMap_id = %s and 
-				Detector_id = %s 
-		'''
+            SELECT 
+                id,
+                Detector_id, 
+                FieldName, 
+                RA, 
+                _Dec, 
+                EBV, 
+                N128_SkyPixel_id, 
+                Band_id, 
+                MJD, 
+                Exp_Time, 
+                Mag_Lim, 
+                HealpixMap_id 
+            FROM
+                ObservedTile 
+            WHERE
+                HealpixMap_id = %s and 
+                Detector_id = %s 
+        '''
         observed_tiles = {}
         for d in detectors:
             ot_result = query_db([observed_tile_select % (healpix_map_id, d.id)])[0]
@@ -422,62 +422,62 @@ class Teglon:
                     candidates.append((name, coord.SkyCoord(ra, dec, unit=(u.deg, u.deg)), flag1, flag2, is_keck))
 
         select_pix = '''
-			SELECT 
-				running_prob.id, 
-				running_prob.HealpixMap_id, 
-				running_prob.Pixel_Index, 
-				running_prob.Prob, 
-				running_prob.Distmu, 
-				running_prob.Distsigma, 
-				running_prob.Mean, 
-				running_prob.Stddev, 
-				running_prob.Norm, 
-				running_prob.N128_SkyPixel_id, 
-				running_prob.cum_prob 
-			FROM 
-				(SELECT 
-					hp_prob.id, 
-					hp_prob.HealpixMap_id, 
-					hp_prob.Pixel_Index,
-					hp_prob.Prob, 
-					hp_prob.Distmu, 
-					hp_prob.Distsigma, 
-					hp_prob.Mean, 
-					hp_prob.Stddev, 
-					hp_prob.Norm, 
-					hp_prob.N128_SkyPixel_id, 
-					SUM(hp_prob.Prob) OVER(ORDER BY hp_prob.Prob DESC) AS cum_prob 
-				FROM 
-					(SELECT 
-						hp.id, 
-						hp.HealpixMap_id, 
-						hp.Pixel_Index,
-						hp.Prob, 
-						hp.Distmu, 
-						hp.Distsigma, 
-						hp.Mean, 
-						hp.Stddev, 
-						hp.Norm, 
-						hp.N128_SkyPixel_id 
-					FROM HealpixPixel hp 
-					WHERE hp.HealpixMap_id = %s 
-					ORDER BY
-						hp.Prob DESC) hp_prob
-					GROUP BY
-						hp_prob.id, 
-						hp_prob.HealpixMap_id, 
-						hp_prob.Pixel_Index,
-						hp_prob.Prob, 
-						hp_prob.Distmu, 
-						hp_prob.Distsigma, 
-						hp_prob.Mean, 
-						hp_prob.Stddev, 
-						hp_prob.Norm, 
-						hp_prob.N128_SkyPixel_id 
-					) running_prob 
-			WHERE 
-				running_prob.cum_prob <= 0.9 
-		'''
+            SELECT 
+                running_prob.id, 
+                running_prob.HealpixMap_id, 
+                running_prob.Pixel_Index, 
+                running_prob.Prob, 
+                running_prob.Distmu, 
+                running_prob.Distsigma, 
+                running_prob.Mean, 
+                running_prob.Stddev, 
+                running_prob.Norm, 
+                running_prob.N128_SkyPixel_id, 
+                running_prob.cum_prob 
+            FROM 
+                (SELECT 
+                    hp_prob.id, 
+                    hp_prob.HealpixMap_id, 
+                    hp_prob.Pixel_Index,
+                    hp_prob.Prob, 
+                    hp_prob.Distmu, 
+                    hp_prob.Distsigma, 
+                    hp_prob.Mean, 
+                    hp_prob.Stddev, 
+                    hp_prob.Norm, 
+                    hp_prob.N128_SkyPixel_id, 
+                    SUM(hp_prob.Prob) OVER(ORDER BY hp_prob.Prob DESC) AS cum_prob 
+                FROM 
+                    (SELECT 
+                        hp.id, 
+                        hp.HealpixMap_id, 
+                        hp.Pixel_Index,
+                        hp.Prob, 
+                        hp.Distmu, 
+                        hp.Distsigma, 
+                        hp.Mean, 
+                        hp.Stddev, 
+                        hp.Norm, 
+                        hp.N128_SkyPixel_id 
+                    FROM HealpixPixel hp 
+                    WHERE hp.HealpixMap_id = %s 
+                    ORDER BY
+                        hp.Prob DESC) hp_prob
+                    GROUP BY
+                        hp_prob.id, 
+                        hp_prob.HealpixMap_id, 
+                        hp_prob.Pixel_Index,
+                        hp_prob.Prob, 
+                        hp_prob.Distmu, 
+                        hp_prob.Distsigma, 
+                        hp_prob.Mean, 
+                        hp_prob.Stddev, 
+                        hp_prob.Norm, 
+                        hp_prob.N128_SkyPixel_id 
+                    ) running_prob 
+            WHERE 
+                running_prob.cum_prob <= 0.9 
+        '''
 
         print("Selecting map pixels...")
         map_pix_result = query_db([select_pix % healpix_map_id])[0]
@@ -624,7 +624,7 @@ class Teglon:
         m.plot(x1, y1, marker='s', markeredgecolor="k", markerfacecolor=clrs["SWOPE"], markersize=20, label="Swope",
                linestyle='None')
         m.plot(x1, y1, marker='s', markeredgecolor="k", markerfacecolor=clrs["SINISTRO"], markersize=18,
-               label="Sinistro", linestyle='None')
+               label="LCOGT", linestyle='None')
         m.plot(x1, y1, marker='s', markeredgecolor="k", markerfacecolor=clrs["THACHER"], markersize=16, label="Thacher",
                linestyle='None')
         m.plot(x1, y1, marker='s', markeredgecolor="k", markerfacecolor=clrs["NICKEL"], markersize=14, label="Nickel",
