@@ -1007,6 +1007,7 @@ class Teglon:
                 cols.append('ExpTime')
                 cols.append('Priority')
                 cols.append('Status')
+                cols.append('A_lambda')
                 csvwriter.writerow(cols)
 
                 for i, row in enumerate(s_tile_result):
@@ -1023,6 +1024,7 @@ class Teglon:
                     cols.append(str(self.options.s_exp_time))
                     cols.append(row[4])
                     cols.append('False')
+                    cols.append("%0.3f" % float(row[6]))
                     csvwriter.writerow(cols)
 
                 print("Done writing out %s" % SWOPE)
@@ -1078,6 +1080,7 @@ class Teglon:
                 cols.append('ExpTime')
                 cols.append('Priority')
                 cols.append('Status')
+                cols.append('A_lambda')
                 csvwriter.writerow(cols)
 
                 for i, row in enumerate(t_tile_result):
@@ -1094,6 +1097,7 @@ class Teglon:
                     cols.append(str(self.options.t_exp_time))
                     cols.append(row[4])
                     cols.append('False')
+                    cols.append("%0.3f" % float(row[6]))
                     csvwriter.writerow(cols)
 
                 print("Done writing out %s" % THACHER)
@@ -1144,6 +1148,7 @@ class Teglon:
                 cols.append('ExpTime')
                 cols.append('Priority')
                 cols.append('Status')
+                cols.append('A_lambda')
                 csvwriter.writerow(cols)
 
                 for i, row in enumerate(galaxies_to_write):
@@ -1176,6 +1181,7 @@ class Teglon:
                     cols.append(str(self.options.g_exp_time))
                     cols.append(row[9])
                     cols.append('False')
+                    cols.append("%0.3f" % float(row[10]))
                     csvwriter.writerow(cols)
 
                 print("Done w/ Galaxies")
