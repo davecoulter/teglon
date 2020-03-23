@@ -316,8 +316,8 @@ generate_uniquePspsOBids_input = False
 get_photo_z = True
 
 path_format = "{}/{}"
-ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
-# ps1_strm_dir = "/data2/ckilpatrick/photoz"
+# ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
+ps1_strm_dir = "/data2/ckilpatrick/photoz"
 ps1_strm_base_file = "hlsp_ps1-strm_ps1_imaging_3pi-{}_grizy_v1.0_cat.csv"
 
 output_file = path_format.format(ps1_strm_dir, "PS1_STRM_Index.txt")
