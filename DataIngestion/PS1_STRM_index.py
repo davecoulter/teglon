@@ -312,7 +312,7 @@ start = time.time()
 
 index_files = False
 load_index = False
-generate_uniquePspsOBids_input = True
+generate_uniquePspsOBids_input = False
 get_photo_z = True
 
 path_format = "{}/{}"
