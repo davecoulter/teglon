@@ -316,8 +316,8 @@ generate_uniquePspsOBids_input = False
 get_photo_z = True
 
 path_format = "{}/{}"
-# ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
-ps1_strm_dir = "/data2/ckilpatrick/photoz"
+ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
+# ps1_strm_dir = "/data2/ckilpatrick/photoz"
 ps1_strm_base_file = "hlsp_ps1-strm_ps1_imaging_3pi-{}_grizy_v1.0_cat.csv"
 
 output_file = path_format.format(ps1_strm_dir, "PS1_STRM_Index.txt")
@@ -388,12 +388,18 @@ if generate_uniquePspsOBids_input:
     select_uniquePspsOBids = '''
         SELECT uniquePspsOBid FROM PS1_DR2_S190814bv_Galaxies 
     '''
+    select_file_index = '''
+        SELECT Get_PS1_STRM_FileIndex(%s)
+    '''
+
     ids = query_db([select_uniquePspsOBids])[0]
     with open(uniquePspsOBid_index_output_file, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
-        csvwriter.writerow(("uniquePspsOBid", ))
+        csvwriter.writerow(("uniquePspsOBid", "file_id"))
+
         for id in ids:
-            csvwriter.writerow(id)
+            file_id = str(query_db([select_file_index % id])[0][0][0]).zfill(4)
+            csvwriter.writerow((id[0], file_id))
 
 if get_photo_z:
 
@@ -411,25 +417,21 @@ if get_photo_z:
                 elif count == stop:
                     return
 
-    select_file_index = '''
-        SELECT Get_PS1_STRM_FileIndex(%s)
-    '''
 
-    # Load uniquePspsOBids from file...
-    ids = []
+    # Load uniquePspsOBids and file indices from input file...
+    file_maps = {}
+
     with open(uniquePspsOBid_index_output_file, 'r') as csvfile:
         csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
         next(csvreader)  # skip header
 
         for row in csvreader:
-            ids.append((int(row[0])))
+            uniquePspsOBid = row[0]
+            file_id = row[1]
 
-    file_maps = {}
-    for id in ids:
-        file_id = str(query_db([select_file_index % id])[0][0][0]).zfill(4)
-        if file_id not in file_maps:
-            file_maps[file_id] = []
-        file_maps[file_id].append(id)
+            if file_id not in file_maps:
+                file_maps[file_id] = []
+            file_maps[file_id].append(id)
 
     print("Files to search: %s" % file_maps.keys())
     print("Number of files to search: %s" % len(file_maps))
