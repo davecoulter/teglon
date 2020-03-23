@@ -316,8 +316,8 @@ generate_uniquePspsOBids_input = False
 get_photo_z = True
 
 path_format = "{}/{}"
-# ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
-ps1_strm_dir = "/data2/ckilpatrick/photoz"
+ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
+# ps1_strm_dir = "/data2/ckilpatrick/photoz"
 ps1_strm_base_file = "hlsp_ps1-strm_ps1_imaging_3pi-{}_grizy_v1.0_cat.csv"
 
 output_file = path_format.format(ps1_strm_dir, "PS1_STRM_Index.txt")
@@ -426,12 +426,12 @@ if get_photo_z:
         next(csvreader)  # skip header
 
         for row in csvreader:
-            uniquePspsOBid = row[0]
+            uniquePspsOBid = int(row[0])
             file_id = row[1]
 
             if file_id not in file_maps:
                 file_maps[file_id] = []
-            file_maps[file_id].append(id)
+            file_maps[file_id].append(uniquePspsOBid)
 
     print("Files to search: %s" % file_maps.keys())
     print("Number of files to search: %s" % len(file_maps))
@@ -451,9 +451,10 @@ if get_photo_z:
         print("Searching %s ids in %s... [%s/%s]" % (len(obj_ids), file_path, i + 1, len(file_maps)))
 
         records = get_records(file_path, obj_ids)
-        for r in records:
-            with open(uniquePspsOBid_data_output_file, 'a') as csvfile:
-                csvwriter = csv.writer(csvfile, delimiter=',')
+
+        with open(uniquePspsOBid_data_output_file, 'a') as csvfile:
+            csvwriter = csv.writer(csvfile, delimiter=',')
+            for r in records:
                 csvwriter.writerow(r)
 
         end_search = time.time()
