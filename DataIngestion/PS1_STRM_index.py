@@ -443,20 +443,22 @@ if get_photo_z:
                             "z_phot", "z_photErr", "z_phot0", "extrapolation_Photoz", "cellDistance_Photoz",
                             "cellID_Photoz"))
 
-    start_search = time.time()
-    for file_id, obj_ids in file_maps.items():
+
+    for i, (file_id, obj_ids) in enumerate(file_maps.items()):
+
+        start_search = time.time()
         file_path = path_format.format(ps1_strm_dir, ps1_strm_base_file.format(file_id))
+        print("Searching %s ids in %s... [%s/%s]" % (len(obj_ids), file_path, i + 1, len(file_maps)))
+
         records = get_records(file_path, obj_ids)
         for r in records:
             with open(uniquePspsOBid_data_output_file, 'a') as csvfile:
                 csvwriter = csv.writer(csvfile, delimiter=',')
                 csvwriter.writerow(r)
 
-    end_search = time.time()
-    search_duration = (end_search - start_search)
-    print("\n********* start DEBUG ***********")
-    print("Execution time: %s" % search_duration)
-    print("********* end DEBUG ***********\n")
+        end_search = time.time()
+        search_duration = (end_search - start_search)
+        print("\t...Done. Execution time: %s" % search_duration)
 
 
 end = time.time()
