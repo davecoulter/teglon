@@ -5,11 +5,13 @@ LABEL maintainer="Dave Coulter (dcoulter@ucsc.edu)"
 
 SHELL ["/bin/bash", "-c"]
 
+# If there are problems, remove astLib and htop... they aren't necessary right now
 RUN apt-get update && \
-apt-get install htop && \
+apt-get install -y build-essential && \
+apt-get install -y htop && \
 pip install --upgrade pip && \
 pip install mysqlclient && \
-#pip install ray==0.7.6 && \
+pip install astLib && \
 conda install -c conda-forge spherical-geometry && \
 conda update numpy && \
 apt-get clean && rm -rf /opt/conda/pkgs/* && \

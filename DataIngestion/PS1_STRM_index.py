@@ -310,52 +310,152 @@ def batch_insert(insert_statement, insert_data, batch_size=50000):
 
 start = time.time()
 
+index_files = False
+load_index = False
+generate_uniquePspsOBids_input = True
+get_photo_z = True
+
 path_format = "{}/{}"
-# ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
-ps1_strm_dir = "/data2/ckilpatrick/photoz"
+ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
+# ps1_strm_dir = "/data2/ckilpatrick/photoz"
+ps1_strm_base_file = "hlsp_ps1-strm_ps1_imaging_3pi-{}_grizy_v1.0_cat.csv"
 
-small_initial_val = 9999999999999999999999999999
-large_initial_val = -9999999999999999999999999999
-
-# file_id_map = OrderedDict()
-
-# initialize output
 output_file = path_format.format(ps1_strm_dir, "PS1_STRM_Index.txt")
-with open(output_file, 'w') as csvfile:
-    csvwriter = csv.writer(csvfile, delimiter=',')
-    csvwriter.writerow(("File_ID", "Min_uniquePspsOBid", "Max_uniquePspsOBid"))
+uniquePspsOBid_index_output_file = path_format.format(ps1_strm_dir, "PS1_STRM_Indices_For_GW190814_Galaxies.txt")
+uniquePspsOBid_data_output_file = path_format.format(ps1_strm_dir, "PS1_STRM_Data_For_GW190814_Galaxies.txt")
 
-for file in os.listdir(ps1_strm_dir):
-    if file.endswith(".csv"):
+if index_files:
+    small_initial_val = 9999999999999999999999999999
+    large_initial_val = -9999999999999999999999999999
 
-        file_id = (file.split("_")[4]).replace("3pi-", "")
-        smallest_uniquePspsOBid = small_initial_val
-        largest_uniquePspsOBid = large_initial_val
+    # initialize output
 
-        file_path = path_format.format(ps1_strm_dir, file)
+    with open(output_file, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile, delimiter=',')
+        csvwriter.writerow(("File_ID", "Min_uniquePspsOBid", "Max_uniquePspsOBid"))
 
-        print("Processing: %s..." % file_path)
+    for file in os.listdir(ps1_strm_dir):
+        if file.endswith(".csv"):
 
-        with open(file_path, 'r') as csvfile:
-            csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
-            next(csvreader)  # skip header
+            file_id = (file.split("_")[4]).replace("3pi-", "")
+            smallest_uniquePspsOBid = small_initial_val
+            largest_uniquePspsOBid = large_initial_val
 
-            for row in csvreader:
-                uniquePspsOBid = float(row[1])
-                if uniquePspsOBid > largest_uniquePspsOBid:
-                    largest_uniquePspsOBid = uniquePspsOBid
+            file_path = path_format.format(ps1_strm_dir, file)
 
-                if uniquePspsOBid < smallest_uniquePspsOBid:
-                    smallest_uniquePspsOBid = uniquePspsOBid
+            print("Processing: %s..." % file_path)
 
-        if smallest_uniquePspsOBid == small_initial_val or largest_uniquePspsOBid == large_initial_val:
-            raise Exception("Couldn't find valid uniquePspsOBid for file: {}! Exiting...".format(file))
+            with open(file_path, 'r') as csvfile:
+                csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+                next(csvreader)  # skip header
 
-        # file_id_map[file_id] = (smallest_uniquePspsOBid, largest_uniquePspsOBid)
-        # append the results
-        with open(output_file, 'a') as csvfile:
-            csvwriter = csv.writer(csvfile, delimiter=',')
-            csvwriter.writerow((file_id, "%s" % int(smallest_uniquePspsOBid), "%s" % int(largest_uniquePspsOBid)))
+                for row in csvreader:
+                    uniquePspsOBid = float(row[1])
+                    if uniquePspsOBid > largest_uniquePspsOBid:
+                        largest_uniquePspsOBid = uniquePspsOBid
+
+                    if uniquePspsOBid < smallest_uniquePspsOBid:
+                        smallest_uniquePspsOBid = uniquePspsOBid
+
+            if smallest_uniquePspsOBid == small_initial_val or largest_uniquePspsOBid == large_initial_val:
+                raise Exception("Couldn't find valid uniquePspsOBid for file: {}! Exiting...".format(file))
+
+            # append the results
+            with open(output_file, 'a') as csvfile:
+                csvwriter = csv.writer(csvfile, delimiter=',')
+                csvwriter.writerow((file_id, "%s" % int(smallest_uniquePspsOBid), "%s" % int(largest_uniquePspsOBid)))
+
+if load_index:
+
+    PS1_STRM_FileIndex_data = []
+
+    with open(output_file, 'r') as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+        next(csvreader)  # skip header
+
+        for row in csvreader:
+            PS1_STRM_FileIndex_data.append((int(row[0]), int(row[1]), int(row[2])))
+
+    PS1_STRM_FileIndex_data_sorted = sorted(PS1_STRM_FileIndex_data, key=lambda x: x[0])
+
+    insert_PS1_file_index = '''
+        INSERT INTO PS1_STRM_FileIndex (File_id, uniquePspsOBid_min, uniquePspsOBid_max) VALUES (%s, %s, %s) 
+    '''
+    print("Inserting %s rows..." % len(PS1_STRM_FileIndex_data_sorted))
+    batch_insert(insert_PS1_file_index, PS1_STRM_FileIndex_data_sorted, batch_size=5000)
+
+if generate_uniquePspsOBids_input:
+    select_uniquePspsOBids = '''
+        SELECT uniquePspsOBid FROM PS1_DR2_S190814bv_Galaxies 
+    '''
+    ids = query_db([select_uniquePspsOBids])[0]
+    with open(uniquePspsOBid_index_output_file, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile, delimiter=',')
+        csvwriter.writerow(("uniquePspsOBid", ))
+        for id in ids:
+            csvwriter.writerow(id)
+
+if get_photo_z:
+
+    def get_records(file, id_list):
+        with open(file, "r") as csvfile:
+            datareader = csv.reader(csvfile)
+            next(datareader)
+
+            stop = len(id_list)
+            count = 0
+            for row in datareader:
+                if int(row[1]) in id_list:
+                    yield row
+                    count += 1
+                elif count == stop:
+                    return
+
+    select_file_index = '''
+        SELECT Get_PS1_STRM_FileIndex(%s)
+    '''
+
+    # Load uniquePspsOBids from file...
+    ids = []
+    with open(uniquePspsOBid_index_output_file, 'r') as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+        next(csvreader)  # skip header
+
+        for row in csvreader:
+            ids.append((int(row[0])))
+
+    file_maps = {}
+    for id in ids:
+        file_id = str(query_db([select_file_index % id])[0][0][0]).zfill(4)
+        if file_id not in file_maps:
+            file_maps[file_id] = []
+        file_maps[file_id].append(id)
+
+    print("Files to search: %s" % file_maps.keys())
+    print("Number of files to search: %s" % len(file_maps))
+
+    with open(uniquePspsOBid_data_output_file, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile, delimiter=',')
+        csvwriter.writerow(("objID", "uniquePspsOBid", "raMean", "decMean", "l", "b", "class", "prob_Galaxy",
+                            "prob_Star", "prob_QSO", "extrapolation_Class", "cellDistance_Class", "cellID_Class",
+                            "z_phot", "z_photErr", "z_phot0", "extrapolation_Photoz", "cellDistance_Photoz",
+                            "cellID_Photoz"))
+
+    start_search = time.time()
+    for file_id, obj_ids in file_maps.items():
+        file_path = path_format.format(ps1_strm_dir, ps1_strm_base_file.format(file_id))
+        records = get_records(file_path, obj_ids)
+        for r in records:
+            with open(uniquePspsOBid_data_output_file, 'a') as csvfile:
+                csvwriter = csv.writer(csvfile, delimiter=',')
+                csvwriter.writerow(r)
+
+    end_search = time.time()
+    search_duration = (end_search - start_search)
+    print("\n********* start DEBUG ***********")
+    print("Execution time: %s" % search_duration)
+    print("********* end DEBUG ***********\n")
+
 
 end = time.time()
 duration = (end - start)
