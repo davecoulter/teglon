@@ -312,8 +312,10 @@ start = time.time()
 
 index_files = False
 load_index = False
-generate_uniquePspsOBids_input = False
-get_photo_z = True
+generate_uniquePspsOBids_input = True
+get_photo_z = False
+load_photo_z = False
+create_galaxy_pixel_relations = False
 
 path_format = "{}/{}"
 # ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
@@ -386,7 +388,7 @@ if load_index:
 
 if generate_uniquePspsOBids_input:
     select_uniquePspsOBids = '''
-        SELECT uniquePspsOBid FROM PS1_DR2_S190814bv_Galaxies 
+        SELECT uniquePspsOBid FROM PS1_Galaxy 
     '''
     select_file_index = '''
         SELECT Get_PS1_STRM_FileIndex(%s)
@@ -461,6 +463,146 @@ if get_photo_z:
         search_duration = (end_search - start_search)
         print("\t...Done. Execution time: %s" % search_duration)
 
+if load_photo_z:
+
+    PS1_STRM_data = []
+
+    with open(uniquePspsOBid_data_output_file, 'r') as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+        next(csvreader)  # skip header
+
+        for row in csvreader:
+            PS1_STRM_data.append(row)
+
+    insert_PS1_file_index = '''
+            INSERT INTO PS1_STRM (
+                objID,
+                uniquePspsOBid,
+                raMean,
+                decMean,
+                l,
+                b,
+                class,
+                prob_Galaxy,
+                prob_Star,
+                prob_QSO,
+                extrapolation_Class,
+                cellDistance_Class,
+                cellID_Class,
+                z_phot,
+                z_photErr,
+                z_phot0,
+                extrapolation_Photoz,
+                cellDistance_Photoz,
+                cellID_Photoz
+            ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) 
+        '''
+    print("Inserting %s rows..." % len(PS1_STRM_data))
+    batch_insert(insert_PS1_file_index, PS1_STRM_data, batch_size=5000)
+
+# if create_galaxy_pixel_relations:
+#     print("Building galaxy-pixel relation...")
+#     # 1. Select all Galaxies from GD2
+#     # 2. Resolve all Galaxies to a HealpixPixel index/id
+#     # 3. Store HealpixPixel_GalaxyDistance2 association
+#
+#     def get_healpix_pixel_id(galaxy_info):
+#         phi, theta = np.radians(float(galaxy_info[8])), 0.5 * np.pi - np.radians(float(galaxy_info[9]))
+#
+#         # map NSIDE is last argument of galaxy_info
+#         # return the galaxy_id with the pixel index in the NSIDE of the healpix map
+#         return (galaxy_info[0], hp.ang2pix(int(galaxy_info[-1]), theta, phi))
+#
+#     t1 = time.time()
+#
+#     healpix_map_id = 2
+#     map_nside = 1024
+#
+#     map_pixel_select = "SELECT id, HealpixMap_id, Pixel_Index, Prob, Distmu, Distsigma, Distnorm, Mean, Stddev, Norm, N128_SkyPixel_id FROM HealpixPixel WHERE HealpixMap_id = %s;"
+#     map_pixels = query_db([map_pixel_select % healpix_map_id])[0]
+#
+#     map_pixel_dict = {}
+#     for p in map_pixels:
+#         map_pixel_dict[int(p[2])] = p
+#
+#     galaxy_select = '''
+#                     SELECT id
+#                 '''
+#     galaxy_result = query_db([galaxy_select % map_nside])[0]
+#     print("Number of Galaxies: %s" % len(galaxy_result))
+#     t2 = time.time()
+#     print("\n********* start DEBUG ***********")
+#     print("Galaxy select execution time: %s" % (t2 - t1))
+#     print("********* end DEBUG ***********\n")
+#
+#     t1 = time.time()
+#
+#     with mp.Pool() as pool:
+#         galaxy_pixel_relations = pool.map(get_healpix_pixel_id, galaxy_result)
+#
+#     galaxy_pixel_data = []
+#     for gp in galaxy_pixel_relations:
+#         _pixel_index = gp[1]
+#         _pixel_id = map_pixel_dict[_pixel_index][0]
+#         _galaxy_id = gp[0]
+#         galaxy_pixel_data.append((_pixel_id, _galaxy_id))
+#
+#     t2 = time.time()
+#     print("\n********* start DEBUG ***********")
+#     print("Galaxy-pixel creation execution time: %s" % (t2 - t1))
+#     print("********* end DEBUG ***********\n")
+#
+#     # Create CSV, upload, and clean up CSV
+#     galaxy_pixel_upload_csv = "%s/%s_gal_pix_upload.csv" % (formatted_healpix_dir, self.options.gw_id)
+#     try:
+#         t1 = time.time()
+#         print("Creating `%s`" % galaxy_pixel_upload_csv)
+#         with open(galaxy_pixel_upload_csv, 'w') as csvfile:
+#             csvwriter = csv.writer(csvfile)
+#             for data in galaxy_pixel_data:
+#                 csvwriter.writerow(data)
+#
+#         t2 = time.time()
+#         print("\n********* start DEBUG ***********")
+#         print("CSV creation execution time: %s" % (t2 - t1))
+#         print("********* end DEBUG ***********\n")
+#     except Error as e:
+#         print("Error in creating CSV:\n")
+#         print(e)
+#         print("\nExiting")
+#         return 1
+#
+#     t1 = time.time()
+#     upload_sql = """LOAD DATA LOCAL INFILE '%s'
+#                         INTO TABLE HealpixPixel_GalaxyDistance2
+#                         FIELDS TERMINATED BY ','
+#                         LINES TERMINATED BY '\n'
+#                         (HealpixPixel_id, GalaxyDistance2_id);"""
+#
+#     success = bulk_upload(upload_sql % galaxy_pixel_upload_csv)
+#     if not success:
+#         print("\nUnsuccessful bulk upload. Exiting...")
+#         return 1
+#
+#     t2 = time.time()
+#     print("\n********* start DEBUG ***********")
+#     print("CSV upload execution time: %s" % (t2 - t1))
+#
+#     try:
+#         print("Removing `%s`..." % galaxy_pixel_upload_csv)
+#         os.remove(galaxy_pixel_upload_csv)
+#
+#         # Clean up
+#         print("freeing `galaxy_pixel_data`...")
+#         del galaxy_pixel_data
+#
+#         print("... Done")
+#     except Error as e:
+#         print("Error in file removal")
+#         print(e)
+#         print("\nExiting")
+#         return 1
 
 end = time.time()
 duration = (end - start)
