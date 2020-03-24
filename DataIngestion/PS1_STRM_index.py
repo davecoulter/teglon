@@ -312,8 +312,8 @@ start = time.time()
 
 index_files = False
 load_index = False
-generate_uniquePspsOBids_input = True
-get_photo_z = False
+generate_uniquePspsOBids_input = False
+get_photo_z = True
 load_photo_z = False
 create_galaxy_pixel_relations = False
 
