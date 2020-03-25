@@ -424,6 +424,7 @@ if get_photo_z:
 
     # Load uniquePspsOBids and file indices from input file...
     file_maps = {}
+    test = 1
 
     with open(uniquePspsOBid_index_output_file, 'r') as csvfile:
         csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
