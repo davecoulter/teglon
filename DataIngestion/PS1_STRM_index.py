@@ -316,7 +316,7 @@ generate_uniquePspsOBids_input = False
 get_photo_z = True
 load_photo_z = False
 create_galaxy_pixel_relations = False
-get_map_pixels_in_northern_95th = False
+get_map_pixels_in_northern_and_southern_95th = False
 
 
 path_format = "{}/{}"
@@ -620,7 +620,7 @@ if create_galaxy_pixel_relations:
         print("\nExiting")
         raise Exception("Exiting...")
 
-if get_map_pixels_in_northern_95th:
+if get_map_pixels_in_northern_and_southern_95th:
     healpix_map_id = 2
     map_nside = 1024
     map_pixel_select = '''
@@ -668,14 +668,24 @@ if get_map_pixels_in_northern_95th:
     # northern_indices = np.where(np.asarray(np.degrees(0.5*np.pi - theta)) > -30.0)
     # northern_95th = top_95th[northern_indices]
     northern_95th = []
+    southern_95th = []
     for p in top_95th:
-        theta, phi = hp.pix2ang(nside=map_nside, ipix=p.index)
-        dec = np.degrees(0.5 * np.pi - theta)
-        if dec >= -30.0:
+        if p.coord.dec.degree >= -30.0:
             northern_95th.append(p)
+        else:
+            southern_95th.append(p)
+        # theta, phi = hp.pix2ang(nside=map_nside, ipix=p.index)
+        # dec = np.degrees(0.5 * np.pi - theta)
+        # if dec >= -30.0:
+        #     northern_95th.append(p)
 
-    print("Contained prob in northern 95th: %0.4f" % np.sum([p.prob for p in northern_95th]))
     print("Number of pixels in northern 95th: %s" % len(northern_95th))
+    print("Contained prob in northern 95th: %0.4f" % np.sum([p.prob for p in northern_95th]))
+    print("Area sq deg northern 95th: %s" % len(northern_95th)*hp.nside2pixarea(map_nside, degrees=True))
+
+    print("Contained prob in northern 95th: %0.4f" % np.sum([p.prob for p in southern_95th]))
+    print("Number of pixels in southern 95th: %s" % len(southern_95th))
+    print("Area sq deg southern 95th: %s" % len(southern_95th) * hp.nside2pixarea(map_nside, degrees=True))
 
     northern_95th_pixel_ids = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
     with open(northern_95th_pixel_ids, 'w') as csvfile:
@@ -683,6 +693,13 @@ if get_map_pixels_in_northern_95th:
         csvwriter.writerow(("pixel_id", ))
         for p in northern_95th:
             csvwriter.writerow((p.id, ))
+
+    southern_95th_pixel_ids = path_format.format(ps1_strm_dir, "southern_95th_pixel_ids.txt")
+    with open(southern_95th_pixel_ids, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile, delimiter=',')
+        csvwriter.writerow(("pixel_id",))
+        for p in southern_95th:
+            csvwriter.writerow((p.id,))
 
 
 
