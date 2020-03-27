@@ -313,15 +313,16 @@ start = time.time()
 index_files = False
 load_index = False
 generate_uniquePspsOBids_input = False
-get_photo_z = True
+get_photo_z = False
 load_photo_z = False
-create_galaxy_pixel_relations = False
 get_map_pixels_in_northern_and_southern_95th = False
+create_galaxy_pixel_relations = False
+
 
 
 path_format = "{}/{}"
-# ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
-ps1_strm_dir = "/data2/ckilpatrick/photoz"
+ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
+# ps1_strm_dir = "/data2/ckilpatrick/photoz"
 ps1_strm_base_file = "hlsp_ps1-strm_ps1_imaging_3pi-{}_grizy_v1.0_cat.csv"
 
 output_file = path_format.format(ps1_strm_dir, "PS1_STRM_Index.txt")
@@ -504,6 +505,92 @@ if load_photo_z:
     print("Inserting %s rows..." % len(PS1_STRM_data))
     batch_insert(insert_PS1_STRM, PS1_STRM_data, batch_size=5000)
 
+if get_map_pixels_in_northern_and_southern_95th:
+    healpix_map_id = 2
+    map_nside = 1024
+    map_pixel_select = '''
+        SELECT 
+            id, 
+            HealpixMap_id, 
+            Pixel_Index, 
+            Prob, 
+            Distmu, 
+            Distsigma, 
+            Distnorm, 
+            Mean, 
+            Stddev, 
+            Norm, 
+            N128_SkyPixel_id 
+        FROM HealpixPixel 
+        WHERE HealpixMap_id = %s 
+    '''
+    map_pixels = query_db([map_pixel_select % healpix_map_id])[0]
+
+    pixels = []
+    for m in map_pixels:
+        pix_id = int(m[0])
+        index = int(m[2])
+        prob = float(m[3])
+        dist = float(m[7])
+        stddev = float(m[8])
+        pixels.append(Pixel_Element(index, map_nside, prob, pixel_id=pix_id, mean_dist=dist, stddev_dist=stddev))
+
+    # Sort Pixels by prob desc
+    sorted_pix = sorted(pixels, key=lambda p:p.prob, reverse=True)
+    threshold = 0.95
+    running_prob = 0.0
+    top_95th = []
+    for p in sorted_pix:
+        if running_prob <= threshold:
+            running_prob += p.prob
+            top_95th.append(p)
+
+    print("Net Prob: %0.4f" % running_prob)
+    print("Total NSIDE=1024 pixels in 95th: %s" % len(top_95th))
+
+    # Cut pixels down to northern 95th
+    # theta, phi = hp.pix2ang(nside=map_nside, ipix=[p.index for p in top_95th])
+    # northern_indices = np.where(np.asarray(np.degrees(0.5*np.pi - theta)) > -30.0)
+    # northern_95th = top_95th[northern_indices]
+    northern_95th = []
+    southern_95th = []
+    northern_south_dec_limit = []
+    for p in top_95th:
+        if p.coord.dec.degree >= -30.0:
+            northern_95th.append(p)
+            northern_south_dec_limit.append(p.coord.dec.degree)
+        else:
+            southern_95th.append(p)
+        # theta, phi = hp.pix2ang(nside=map_nside, ipix=p.index)
+        # dec = np.degrees(0.5 * np.pi - theta)
+        # if dec >= -30.0:
+        #     northern_95th.append(p)
+    print("Min dec of Northern pixels: %s" % np.min(northern_south_dec_limit))
+
+    n_area = len(northern_95th)*hp.nside2pixarea(map_nside, degrees=True)
+    print("Number of pixels in northern 95th: %s" % len(northern_95th))
+    print("Contained prob in northern 95th: %0.4f" % np.sum([p.prob for p in northern_95th]))
+    print("Area sq deg northern 95th: %s" % n_area)
+
+    s_area =len(southern_95th) * hp.nside2pixarea(map_nside, degrees=True)
+    print("Contained prob in northern 95th: %0.4f" % np.sum([p.prob for p in southern_95th]))
+    print("Number of pixels in southern 95th: %s" % len(southern_95th))
+    print("Area sq deg southern 95th: %s" % s_area)
+
+    northern_95th_pixel_ids = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
+    with open(northern_95th_pixel_ids, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile, delimiter=',')
+        csvwriter.writerow(("pixel_id", ))
+        for p in northern_95th:
+            csvwriter.writerow((p.id, ))
+
+    southern_95th_pixel_ids = path_format.format(ps1_strm_dir, "southern_95th_pixel_ids.txt")
+    with open(southern_95th_pixel_ids, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile, delimiter=',')
+        csvwriter.writerow(("pixel_id",))
+        for p in southern_95th:
+            csvwriter.writerow((p.id,))
+
 if create_galaxy_pixel_relations:
     print("Building galaxy-pixel relation...")
     # 1. Select all Galaxies from GD2
@@ -619,87 +706,6 @@ if create_galaxy_pixel_relations:
         print(e)
         print("\nExiting")
         raise Exception("Exiting...")
-
-if get_map_pixels_in_northern_and_southern_95th:
-    healpix_map_id = 2
-    map_nside = 1024
-    map_pixel_select = '''
-        SELECT 
-            id, 
-            HealpixMap_id, 
-            Pixel_Index, 
-            Prob, 
-            Distmu, 
-            Distsigma, 
-            Distnorm, 
-            Mean, 
-            Stddev, 
-            Norm, 
-            N128_SkyPixel_id 
-        FROM HealpixPixel 
-        WHERE HealpixMap_id = %s 
-    '''
-    map_pixels = query_db([map_pixel_select % healpix_map_id])[0]
-
-    pixels = []
-    for m in map_pixels:
-        pix_id = int(m[0])
-        index = int(m[2])
-        prob = float(m[3])
-        dist = float(m[7])
-        stddev = float(m[8])
-        pixels.append(Pixel_Element(index, map_nside, prob, pixel_id=pix_id, mean_dist=dist, stddev_dist=stddev))
-
-    # Sort Pixels by prob desc
-    sorted_pix = sorted(pixels, key=lambda p:p.prob, reverse=True)
-    threshold = 0.95
-    running_prob = 0.0
-    top_95th = []
-    for p in sorted_pix:
-        if running_prob <= threshold:
-            running_prob += p.prob
-            top_95th.append(p)
-
-    print("Net Prob: %0.4f" % running_prob)
-    print("Total NSIDE=1024 pixels in 95th: %s" % len(top_95th))
-
-    # Cut pixels down to northern 95th
-    # theta, phi = hp.pix2ang(nside=map_nside, ipix=[p.index for p in top_95th])
-    # northern_indices = np.where(np.asarray(np.degrees(0.5*np.pi - theta)) > -30.0)
-    # northern_95th = top_95th[northern_indices]
-    northern_95th = []
-    southern_95th = []
-    for p in top_95th:
-        if p.coord.dec.degree >= -30.0:
-            northern_95th.append(p)
-        else:
-            southern_95th.append(p)
-        # theta, phi = hp.pix2ang(nside=map_nside, ipix=p.index)
-        # dec = np.degrees(0.5 * np.pi - theta)
-        # if dec >= -30.0:
-        #     northern_95th.append(p)
-
-    print("Number of pixels in northern 95th: %s" % len(northern_95th))
-    print("Contained prob in northern 95th: %0.4f" % np.sum([p.prob for p in northern_95th]))
-    print("Area sq deg northern 95th: %s" % len(northern_95th)*hp.nside2pixarea(map_nside, degrees=True))
-
-    print("Contained prob in northern 95th: %0.4f" % np.sum([p.prob for p in southern_95th]))
-    print("Number of pixels in southern 95th: %s" % len(southern_95th))
-    print("Area sq deg southern 95th: %s" % len(southern_95th) * hp.nside2pixarea(map_nside, degrees=True))
-
-    northern_95th_pixel_ids = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
-    with open(northern_95th_pixel_ids, 'w') as csvfile:
-        csvwriter = csv.writer(csvfile, delimiter=',')
-        csvwriter.writerow(("pixel_id", ))
-        for p in northern_95th:
-            csvwriter.writerow((p.id, ))
-
-    southern_95th_pixel_ids = path_format.format(ps1_strm_dir, "southern_95th_pixel_ids.txt")
-    with open(southern_95th_pixel_ids, 'w') as csvfile:
-        csvwriter = csv.writer(csvfile, delimiter=',')
-        csvwriter.writerow(("pixel_id",))
-        for p in southern_95th:
-            csvwriter.writerow((p.id,))
 
 
 

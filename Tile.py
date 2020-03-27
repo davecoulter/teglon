@@ -6,16 +6,16 @@ import healpy as hp
 from matplotlib.patches import Polygon
 import statistics
 from shapely.ops import linemerge, unary_union, polygonize, split
+from shapely.ops import transform as shapely_transform
+from shapely.geometry import Point
 from Teglon_Shape import *
 
 
 class Tile(Telgon_Shape):
     # def __init__(self, coord, width, height, nside, net_prob=0.0):
-    def __init__(self, central_ra_deg, central_dec_deg, width, height, nside, net_prob=0.0, tile_id=None):
+    def __init__(self, central_ra_deg, central_dec_deg, width, height, nside, net_prob=0.0, tile_id=None, radius=None):
 
         self.id = tile_id
-
-        # self.coord = coord
 
         # Test
         self.dec_deg = central_dec_deg
@@ -25,6 +25,7 @@ class Tile(Telgon_Shape):
 
         self.width = width
         self.height = height
+        self.radius = radius
 
         self.nside = nside
         self.net_prob = net_prob
@@ -46,7 +47,10 @@ class Tile(Telgon_Shape):
         self.__corner_xyz = np.array([])
 
         # Used to check if this object is within this "radius proxy" of the coordinate signularity
-        self.__radius_proxy = 5.0 * np.sqrt(self.width * self.height / np.pi)
+        self.__radius_proxy = None
+        if not (self.width is None and self.height is None):
+            self.__radius_proxy = 5.0 * np.sqrt(self.width * self.height / np.pi)
+
         self.__polygon = None
         self.__query_polygon = None
         self.__query_polygon_string = None
@@ -62,44 +66,55 @@ class Tile(Telgon_Shape):
     def corner_coords(self):
 
         if len(self.__corner_coords) == 0:
-            # # Get correction factor:
-            # d = self.coord.dec.radian
-            # width_corr = self.width/np.abs(np.cos(d))
+            if self.radius is None:
+                # # Get correction factor:
+                # d = self.coord.dec.radian
+                # width_corr = self.width/np.abs(np.cos(d))
 
-            # # Define the tile offsets:
-            # ra_offset = coord.Angle(width_corr/2., unit=u.deg)
-            # dec_offset = coord.Angle(self.height/2., unit=u.deg)
+                # # Define the tile offsets:
+                # ra_offset = coord.Angle(width_corr/2., unit=u.deg)
+                # dec_offset = coord.Angle(self.height/2., unit=u.deg)
 
-            # southern_dec = (self.coord.dec - dec_offset) if (self.coord.dec - dec_offset).degree > -90 else coord.Angle((self.coord.dec - dec_offset).degree + 0.00001, unit=u.degree)
-            # northern_dec = (self.coord.dec + dec_offset) if (self.coord.dec + dec_offset).degree < 90 else coord.Angle((self.coord.dec + dec_offset).degree - 0.00001, unit=u.degree)
+                # southern_dec = (self.coord.dec - dec_offset) if (self.coord.dec - dec_offset).degree > -90 else coord.Angle((self.coord.dec - dec_offset).degree + 0.00001, unit=u.degree)
+                # northern_dec = (self.coord.dec + dec_offset) if (self.coord.dec + dec_offset).degree < 90 else coord.Angle((self.coord.dec + dec_offset).degree - 0.00001, unit=u.degree)
 
-            # SW = coord.SkyCoord(self.coord.ra - ra_offset, southern_dec)
-            # NW = coord.SkyCoord(self.coord.ra - ra_offset, northern_dec)
+                # SW = coord.SkyCoord(self.coord.ra - ra_offset, southern_dec)
+                # NW = coord.SkyCoord(self.coord.ra - ra_offset, northern_dec)
 
-            # SE = coord.SkyCoord(self.coord.ra + ra_offset, southern_dec)
-            # NE = coord.SkyCoord(self.coord.ra + ra_offset, northern_dec)
+                # SE = coord.SkyCoord(self.coord.ra + ra_offset, southern_dec)
+                # NE = coord.SkyCoord(self.coord.ra + ra_offset, northern_dec)
 
-            # self.__corner_coords = np.asarray([SW,NW,NE,SE])
+                # self.__corner_coords = np.asarray([SW,NW,NE,SE])
 
-            # Get correction factor:
-            width_corr = self.width / np.abs(np.cos(self.dec_rad))
+                # Get correction factor:
+                width_corr = self.width / np.abs(np.cos(self.dec_rad))
 
-            # Define the tile offsets:
-            ra_offset = (width_corr / 2.)
-            dec_offset = (self.height / 2.)
+                # Define the tile offsets:
+                ra_offset = (width_corr / 2.)
+                dec_offset = (self.height / 2.)
 
-            southern_dec = (self.dec_deg - dec_offset) if (self.dec_deg - dec_offset) > -90 else (
-                        self.dec_deg - dec_offset + 0.00001)
-            northern_dec = (self.dec_deg + dec_offset) if (self.dec_deg + dec_offset) < 90 else (
-                        self.dec_deg + dec_offset - 0.00001)
+                southern_dec = (self.dec_deg - dec_offset) if (self.dec_deg - dec_offset) > -90 else (
+                            self.dec_deg - dec_offset + 0.00001)
+                northern_dec = (self.dec_deg + dec_offset) if (self.dec_deg + dec_offset) < 90 else (
+                            self.dec_deg + dec_offset - 0.00001)
 
-            SW = ((self.ra_deg - ra_offset), southern_dec)
-            NW = ((self.ra_deg - ra_offset), northern_dec)
+                SW = ((self.ra_deg - ra_offset), southern_dec)
+                NW = ((self.ra_deg - ra_offset), northern_dec)
 
-            SE = ((self.ra_deg + ra_offset), southern_dec)
-            NE = ((self.ra_deg + ra_offset), northern_dec)
+                SE = ((self.ra_deg + ra_offset), southern_dec)
+                NE = ((self.ra_deg + ra_offset), northern_dec)
 
-            self.__corner_coords = np.asarray([SW, NW, NE, SE])
+                self.__corner_coords = np.asarray([SW, NW, NE, SE])
+            else:
+                # if this is a circular aperture, get alternative coords
+                angular_radius_deg = self.radius
+
+                c1 = Point(self.ra_deg, self.dec_deg).buffer(angular_radius_deg)
+                c2 = shapely_transform(lambda x, y, z=None: ((self.ra_deg - (self.ra_deg - x) /
+                                                              np.abs(np.cos(np.radians(y)))), y), c1)
+
+                # clip the last 2 coords off to protect against degenerate corners
+                self.__corner_coords = np.asarray([(c[0], c[1]) for c in c2.exterior.coords[:-2]])
 
         return self.__corner_coords
 
