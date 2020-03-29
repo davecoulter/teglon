@@ -82,6 +82,9 @@ import json
 
 import MySQLdb as my
 from scipy.stats import pearsonr
+from scipy.interpolate import interp1d, interp2d
+
+import pprint
 # endregion
 
 # region config
@@ -314,6 +317,8 @@ write_eazy_input = False
 do_eazy = False
 test_photozs = False
 
+test_curve_fit = False
+read_region_poly = True
 
 
 
@@ -500,7 +505,7 @@ if load_PS1_data:
     print("Inserting %s rows..." % len(PS1_data))
     batch_insert(insert_PS1, PS1_data_list, batch_size=1000)
 
-load_crossmatch = True
+load_crossmatch = False
 crossmatch_dict = OrderedDict()
 if load_crossmatch:
 
@@ -970,10 +975,903 @@ if test_photozs:
     print("Done...")
     plt.close('all')
 
+path_format = "{}/{}"
+ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
+if test_curve_fit:
+
+    from scipy.optimize import curve_fit
+
+    def func1(x, a, b, c, d):
+    # def func1(x, a, b):
+        # return a * np.exp(-b * x) + c
+        # return a * np.sqrt(b * (x + c)) + d
+        return a * (x-d)**2 + b * (x-d) + c
+        # return a * np.log10(b * (x - c)) + d
+        # return a * np.log2(b * x) + c
+        # return a * x**3 + b*x**2 + c*x
+        # return a + b * (x - d)/(1 + c * (x - d))
+
+        # return 1.0 / (1 + np.exp(-b * (x - a)))
+
+    def func2(x, a, b, c):
+        # return a * np.exp(-b * x) + c
+        # return a * np.log(b * x) + c
+        return a * x ** 2 + b * x + c
+        # return a * x**3 + b*x**2 + c*x
 
 
 
 
+    _14_0_20_0 = "14.0_20.0"
+
+    _20_0_20_5 = "20.0_20.5"
+    _20_5_21_0 = "20.5_21.0"
+    _21_0_21_5 = "21.0_21.5"
+    _21_5_22_0 = "21.5_22.0"
+    Q3 = "Q3"
+    Q4 = "Q4"
+
+    osDES_keylist = [
+        (_20_0_20_5, Q3, "red", "-", "20.0--20.5"),
+        (_20_0_20_5, Q4, "red", "--", ""),
+
+        (_20_5_21_0, Q3, "blue", "-", "20.5--21.0"),
+        (_20_5_21_0, Q4, "blue", "--", ""),
+
+        (_21_0_21_5, Q3, "darkgreen", "-", "21.0--21.5"),
+        (_21_0_21_5, Q4, "darkgreen", "--", ""),
+
+        (_21_5_22_0, Q3, "khaki", "-", "21.5--22.0"),
+        (_21_5_22_0, Q4, "khaki", "--", "")
+    ]
+
+    ozDES_data = OrderedDict()
+    ozDES_models = OrderedDict()
+
+    # Load all datasets
+    for key in osDES_keylist:
+        file_path = path_format.format(ps1_strm_dir, "{}_{}.csv".format(key[0], key[1]))
+
+        if key[0] not in ozDES_data:
+            ozDES_data[key[0]] = OrderedDict()
+
+        ozDES_data[key[0]][key[1]] = [[], []]
+
+        with open(file_path, 'r') as csvfile:
+            csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+
+            for row in csvreader:
+                exp_time = float(row[0])
+                success = float(row[1]) / 100.
+
+                ozDES_data[key[0]][key[1]][0].append(exp_time)
+                ozDES_data[key[0]][key[1]][1].append(success)
+
+            # exp_times = [0.0] + ozDES_data[key[0]][key[1]][0]
+            # successes = [0.0] + ozDES_data[key[0]][key[1]][1]
+            exp_times = ozDES_data[key[0]][key[1]][0]
+            successes = ozDES_data[key[0]][key[1]][1]
+
+
+            # Curve fit test
+            popt, pcov = None, None
+            sigmas1 = [0.05, 0.1, 0.20, 0.20]
+            sigmas2 = [0.05, 0.1, 0.20]
+            if len(exp_times) == 3:
+                popt, pcov = curve_fit(func2, exp_times[0:3], successes[0:3], sigma=sigmas2)
+            else:
+                popt, pcov = curve_fit(func1, exp_times[0:4], successes[0:4], sigma=sigmas1)
+
+            # Get slope of first two points...
+            # m = (successes[1] - successes[0]) / (exp_times[1] - exp_times[0])
+            # y_0 = successes[0] - m * exp_times[0]
+            # model = interp1d([0] + exp_times, [y_0] + successes)
+
+            if key[0] not in ozDES_models:
+                ozDES_models[key[0]] = OrderedDict()
+
+            # ozDES_models[key[0]][key[1]] = model
+            ozDES_models[key[0]][key[1]] = popt
+
+
+    fig = plt.figure(figsize=(8, 6), dpi=800)
+    ax1 = fig.add_subplot(111)
+
+    model_time = np.linspace(40, 300, 500)
+    for key in osDES_keylist:
+
+        if key[1] == Q4:
+            continue
+
+        # model = ozDES_models[key[0]][key[1]]
+        model_popt = ozDES_models[key[0]][key[1]]
+
+        exp_time = ozDES_data[key[0]][key[1]][0]
+        success = np.asarray(ozDES_data[key[0]][key[1]][1]) * 100.0
+
+        # find time to >= 80%
+        # model_success = model(model_time)
+        model_success = None
+        if len(success) == 3:
+            model_success = func2(model_time, *model_popt)
+        else:
+            model_success = func1(model_time, *model_popt)
+
+        # thresh = 0.75
+        # thresh_txt = thresh * 100
+        # time_for_bin_to_thresh_success = next(model_time[i] for i, s in enumerate(model_success) if s >= thresh)
+
+        addendum = ""
+        # if key[0] == _20_0_20_5:
+        #     pass
+        # elif key[0] == _20_5_21_0:
+        #     addendum += "; 80 min => %0.0f%%" % float(model(80.0) * 100.0)
+        # elif key[0] == _21_0_21_5:
+        #     addendum += "; 120 min => %0.0f%%" % float(model(120.0) * 100.0)
+        # elif key[0] == _21_5_22_0:
+        #     addendum += "; 160 min => %0.0f%%" % float(model(160.0) * 100.0)
+
+        # Plot data
+        if key[4] != "":
+            # lbl = key[4] + "; %0.0f min => %0.0f%%" % (time_for_bin_to_thresh_success, thresh_txt) + addendum
+            # ax1.plot(exp_time, success, color=key[2], linestyle=key[3], label=lbl, alpha=1.0)
+            lbl=""
+            ax1.plot(exp_time, success, color=key[2], marker=".", label=lbl, alpha=1.0)
+        else:
+            # ax1.plot(exp_time, success, color=key[2], linestyle=key[3], alpha=1.0)
+            ax1.plot(exp_time, success, color=key[2], marker=".", alpha=1.0)
+
+        # plot model -- only good until 250 seconds
+        ax1.plot(model_time, model_success * 100, color=key[2], linestyle='--', alpha=0.3)
+
+    ax1.vlines(40.0, 30, 103, colors='k', linestyles='--', label="Min ExpTime: 40 min")
+
+    ax1.set_xlim([0, 1600])
+    ax1.set_ylim([30, 103])
+    ax1.set_xlabel("Exposure time (minutes)")
+    ax1.set_ylabel("Redshift Completeness (%)")
+    ax1.legend(loc="lower right", mode='expand', labelspacing=2.0, bbox_to_anchor=(0.35, 0., 0.65, 0.5))
+    fig.savefig(path_format.format(ps1_strm_dir, "OzDES_Fig5.png"), bbox_inches='tight')
+    plt.close('all')
+
+if read_region_poly:
+
+    # region load ozDES
+    ozDES_data = OrderedDict()
+    ozDES_models = OrderedDict()
+    _20_0_20_5 = "20.0_20.5"
+    _20_5_21_0 = "20.5_21.0"
+    _21_0_21_5 = "21.0_21.5"
+    _21_5_22_0 = "21.5_22.0"
+    Q3 = "Q3"
+    Q4 = "Q4"
+
+    osDES_keylist = [
+        (_20_0_20_5, Q3, "red", "-", "20.0--20.5"),
+        (_20_0_20_5, Q4, "red", "--", ""),
+
+        (_20_5_21_0, Q3, "blue", "-", "20.5--21.0"),
+        (_20_5_21_0, Q4, "blue", "--", ""),
+
+        (_21_0_21_5, Q3, "darkgreen", "-", "21.0--21.5"),
+        (_21_0_21_5, Q4, "darkgreen", "--", ""),
+
+        (_21_5_22_0, Q3, "khaki", "-", "21.5--22.0"),
+        (_21_5_22_0, Q4, "khaki", "--", "")
+    ]
+
+    # Load all datasets
+    for key in osDES_keylist:
+        file_path = path_format.format(ps1_strm_dir, "{}_{}.csv".format(key[0], key[1]))
+
+        if key[0] not in ozDES_data:
+            ozDES_data[key[0]] = OrderedDict()
+
+        ozDES_data[key[0]][key[1]] = [[], []]
+
+        with open(file_path, 'r') as csvfile:
+            csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+
+            for row in csvreader:
+                exp_time = float(row[0])
+                success = float(row[1]) / 100.
+
+                ozDES_data[key[0]][key[1]][0].append(exp_time)
+                ozDES_data[key[0]][key[1]][1].append(success)
+
+            exp_times = ozDES_data[key[0]][key[1]][0]
+            successes = ozDES_data[key[0]][key[1]][1]
+
+            # Assume it stays linear to min exp time. Get slope of first two points...
+            m = (successes[1] - successes[0]) / (exp_times[1] - exp_times[0])
+            y_0 = successes[0] - m * exp_times[0]
+            model = interp1d([0] + exp_times, [y_0] + successes)
+
+            if key[0] not in ozDES_models:
+                ozDES_models[key[0]] = OrderedDict()
+
+            ozDES_models[key[0]][key[1]] = model
+
+
+    # endregion
+
+    class AAOmega_Galaxy():
+        def __init__(self, galaxy_id, ra, dec, prob_galaxy, z, kron_r, pix_index, prob_fraction = 0.0):
+            self.galaxy_id = galaxy_id
+            self.ra = ra
+            self.dec = dec
+            self.prob_fraction = prob_fraction
+            self.prob_galaxy = prob_galaxy
+            self.z = z
+            self.kron_r = kron_r
+            self.pix_index = pix_index
+            self.efficiency_func = ozDES_models[_20_0_20_5][Q3]
+            self.num_exps = 0
+            self.available = True
+            self.required_exps = 1
+
+            if self.kron_r >= 20.5 and self.kron_r < 21.0:
+                self.required_exps = 2
+                self.efficiency_func = ozDES_models[_20_5_21_0][Q3]
+            elif self.kron_r >= 21.0 and self.kron_r < 21.5:
+                self.required_exps = 3
+                self.efficiency_func = ozDES_models[_21_0_21_5][Q3]
+            elif self.kron_r >= 21.5:
+                self.required_exps = 4
+                self.efficiency_func = ozDES_models[_21_5_22_0][Q3]
+
+        def compute_weight(self, num_exps):
+            MIN_EXP = 40  # minutes
+            total_exp_time = num_exps * MIN_EXP
+            efficiency = self.efficiency_func(total_exp_time)
+            metric = efficiency * self.prob_galaxy * self.prob_fraction
+            return metric
+
+        def increment_exps(self, num_exps):
+            self.num_exps += num_exps
+            self.available = self.num_exps < self.required_exps
+
+    class AAOmega_Pixel(Pixel_Element):
+        def __init__(self, index, nside, prob, pixel_id=None, mean_dist=None, stddev_dist=None):
+            Pixel_Element.__init__(self, index, nside, prob, pixel_id, mean_dist, stddev_dist)
+            self.galaxy_ids = []
+
+        def get_available_galaxies_by_multiplicity(self, N):
+            for g_id in self.galaxy_ids:
+                gal = galaxy_dict[g_id]
+                if gal.available and gal.required_exps == N:
+                    yield gal
+
+    map_nside = 1024
+    localization_poly = []
+    northern_pixels = []
+
+    # Key dictionary off pixel index
+    pixel_dict = {}
+
+    # region Load pixel_ids from file...
+    pixel_select = '''
+        SELECT 
+            id, 
+            HealpixMap_id, 
+            Pixel_Index, 
+            Prob, 
+            Distmu, 
+            Distsigma, 
+            Distnorm, 
+            Mean, 
+            Stddev, 
+            Norm, 
+            N128_SkyPixel_id 
+        FROM HealpixPixel 
+        WHERE id IN (%s) 
+    '''
+    northern_pixel_ids = []
+    northern_95th_pixel_ids = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
+    with open(northern_95th_pixel_ids, 'r') as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+        next(csvreader)  # skip header
+
+        for row in csvreader:
+            id = row[0]
+            northern_pixel_ids.append(id)
+    pixel_result_north = query_db([pixel_select % ",".join(northern_pixel_ids)])[0]
+    print("Total NSIDE=1024 pixels in Northern 95th: %s" % len(pixel_result_north))
+
+    for m in pixel_result_north:
+        pix_id = int(m[0])
+        index = int(m[2])
+        prob = float(m[3])
+        dist = float(m[7])
+        stddev = float(m[8])
+        p = AAOmega_Pixel(index, map_nside, prob, pixel_id=pix_id, mean_dist=dist, stddev_dist=stddev)
+        pixel_dict[index] = p
+
+    # Key dictionary off pixel index
+    galaxy_dict = {}
+    # Get galaxies in north
+    ps1_galaxy_select = '''
+        SELECT
+            ps1.id as Galaxy_id, 
+            ps1.gaia_ra,
+            ps1.gaia_dec,
+            ps1.rMeanKronMag,
+            ps.z_phot0,
+            ps.prob_Galaxy,
+            hp.id as Pixel_id,
+            hp.Pixel_Index
+        FROM 
+            PS1_Galaxy ps1
+        JOIN HealpixPixel_PS1_Galaxy hp_ps1 on hp_ps1.PS1_Galaxy_id = ps1.id
+        JOIN PS1_STRM ps on ps.uniquePspsOBid = ps1.uniquePspsOBid
+        JOIN HealpixPixel hp on hp.id = hp_ps1.HealpixPixel_id
+        WHERE 
+            ps1.GoodCandidate = 1 AND
+            hp.id IN (%s) 
+        '''
+    galaxy_result_north = query_db([ps1_galaxy_select % ",".join(northern_pixel_ids)])[0]
+    print("Returned %s galaxies" % len(galaxy_result_north))
+
+    for g in galaxy_result_north:
+        galaxy_id = int(g[0])
+        ra = float(g[1])
+        dec = float(g[2])
+        r = float(g[3])
+        z = float(g[4])
+        prob_Galaxy = float(g[5])
+        pix_id = int(g[6])
+        pix_index = int(g[7])
+
+        # associate this galaxy with the hosting pixel
+        if galaxy_id not in pixel_dict[pix_index].galaxy_ids:
+            pixel_dict[pix_index].galaxy_ids.append(galaxy_id)
+
+        aaomega_galaxy = AAOmega_Galaxy(galaxy_id, ra, dec, prob_Galaxy, z, r, pix_index)
+        if galaxy_id not in galaxy_dict:
+            galaxy_dict[galaxy_id] = aaomega_galaxy
+
+        # if pix_index not in galaxy_dict:
+        #     galaxy_dict[pix_index] = []
+        # galaxy_dict[pix_index].append(aaomega_galaxy)
+
+    for gal_id, galaxy in galaxy_dict.items():
+        pixel = pixel_dict[galaxy.pix_index]
+        prob_fraction = pixel.prob/len(pixel.galaxy_ids)
+        galaxy.prob_fraction = prob_fraction
+
+    class AAOmega_Tile(Tile):
+        def __init__(self, central_ra_deg, central_dec_deg, nside, radius, num_exposures, tile_num):
+            Tile.__init__(self, central_ra_deg, central_dec_deg, width=None, height=None, nside=nside, radius=radius)
+            self.num_exposures = num_exposures
+            self.tile_num = tile_num
+
+        def compute_best_target(self):
+
+            total_prob = 0.0
+            total_num_galxies = 0
+            total_fibers = 370 * self.num_exposures
+
+            contained_pixels = []
+            for pi in self.enclosed_pixel_indices:
+                # some pixels will be outside of our localization...
+                if pi in pixel_dict:
+                    contained_pixels.append(pixel_dict[pi])
+
+            # contained_pixels = [pixel_dict[pi] for pi in self.enclosed_pixel_indices]
+
+            ## TEST
+            # test_n1_pixels = [9001088, 9066655, 9078943, 9066656, 9058477, 9029757,
+            #                           9029758]
+
+
+            # total_fibers = 370 * self.num_exposures
+
+            # N3 TESTS
+            # total_fibers = 22  # no edge case
+            # total_fibers = 23  # missing second exposure
+            # total_fibers = 13  # missing second/third exposure
+            # total_fibers = 14  # missing third exposure
+
+            # N2 TESTS
+            # total_fibers = 14  # no edge case
+            # total_fibers = 15  # missing second exposure
+
+            # total_fibers = 5 * self.num_exposures
+            # 15/10
+
+
+
+            if self.num_exposures == 1:
+                # get N=1 list
+                n1_galaxies = []
+                n1_weights = []
+                for p in contained_pixels:
+                    gals = list(p.get_available_galaxies_by_multiplicity(1))
+                    n1_galaxies += gals
+                    for g in gals:
+                        n1_weights.append(g.compute_weight(1))
+
+                ordered_indices_n1 = (-np.asarray(n1_weights)).argsort()
+                top_galaxies_n1 = list(np.asarray(n1_galaxies)[ordered_indices_n1])
+                top_weights_n1 = list(np.asarray(n1_weights)[ordered_indices_n1])
+
+                # Get final list.
+                ordered_galaxies = OrderedDict()
+                for g in top_galaxies_n1:
+                    if g.galaxy_id not in ordered_galaxies:
+                        ordered_galaxies[g.galaxy_id] = 0
+                    ordered_galaxies[g.galaxy_id] += 1
+
+                # # DEBUG
+                # pprint.pprint(ordered_galaxies)
+
+                final_sample = []
+                final_count = 0
+                for gal_id, multiplicity in ordered_galaxies.items():
+                    if (final_count + multiplicity) <= total_fibers:
+                        final_sample.append((gal_id, multiplicity))
+                        final_count += multiplicity
+                    else:
+                        continue
+
+                for s in final_sample:
+                    total_num_galxies += 1
+
+                    gal_id = s[0]
+                    num_exposures = s[1]
+
+                    g = galaxy_dict[gal_id]
+                    total_prob += g.prob_fraction
+                    g.increment_exps(num_exposures)
+
+
+            elif self.num_exposures == 2:
+
+                # test_n1_pixels = [9001088, 9066655, 9078943, 8927357, 8886405, 8964247]
+                # test_n2_pixels = [9058458, 8931498, 8984738]
+                #
+                # contained_pixels = []
+                # for i in test_n1_pixels:
+                #     contained_pixels.append(pixel_dict[i])
+                # for i in test_n2_pixels:
+                #     contained_pixels.append(pixel_dict[i])
+
+                # get N=1 list
+                n1_galaxies = []
+                n1_weights = []
+                for p in contained_pixels:
+                    gals = list(p.get_available_galaxies_by_multiplicity(1))
+                    n1_galaxies += gals
+                    for g in gals:
+                        n1_weights.append(g.compute_weight(1))
+
+                ordered_indices_n1 = (-np.asarray(n1_weights)).argsort()
+                top_galaxies_n1 = list(np.asarray(n1_galaxies)[ordered_indices_n1])
+                top_weights_n1 = list(np.asarray(n1_weights)[ordered_indices_n1])
+
+                # get entire N=2 list
+                n2_galaxies = []
+                n2_weights = []
+                for p in contained_pixels:
+                    gals = list(p.get_available_galaxies_by_multiplicity(2))
+                    n2_galaxies += gals
+                    for g in gals:
+                        n2_weights.append(g.compute_weight(2))
+
+                ordered_indices_n2 = (-np.asarray(n2_weights)).argsort()
+                top_galaxies_n2 = list(np.asarray(n2_galaxies)[ordered_indices_n2])
+                top_weights_n2 = list(np.asarray(n2_weights)[ordered_indices_n2])
+
+
+                # DEBUG
+                # print(top_weights_n1)
+                # print("\n")
+                # print(top_weights_n2)
+                # print("\n")
+
+
+                for i, n2 in enumerate(top_weights_n2):
+
+                    found = False
+
+                    for j, (w1, w2) in enumerate(zip(top_weights_n1[:-1], top_weights_n1[1:])):
+                        combined_weight = w1 + w2
+
+                        if w1 == 0.0:
+                            continue
+                        elif n2 > combined_weight:
+                            top_weights_n1.insert(j, top_weights_n2[i])
+                            top_weights_n1.insert(j + 1, 0.0) # place holder
+
+                            top_galaxies_n1.insert(j, top_galaxies_n2[i])
+                            top_galaxies_n1.insert(j + 1, top_galaxies_n2[i])
+
+                            found = True
+                            break
+
+                    if not found:
+                        top_galaxies_n1.append(top_galaxies_n2[i])
+                        top_galaxies_n1.append(top_galaxies_n2[i])
+
+                        top_weights_n1.append(top_weights_n2[i])
+                        top_weights_n1.append(0.0)
+
+                # print("\n")
+                # print(top_weights_n1)
+
+                # Get final list.
+                ordered_galaxies = OrderedDict()
+                for g in top_galaxies_n1:
+                    if g.galaxy_id not in ordered_galaxies:
+                        ordered_galaxies[g.galaxy_id] = 0
+                    ordered_galaxies[g.galaxy_id] += 1
+
+                # # DEBUG
+                # pprint.pprint(ordered_galaxies)
+
+                final_sample = []
+                final_count = 0
+                for gal_id, multiplicity in ordered_galaxies.items():
+                    if (final_count + multiplicity) <= total_fibers:
+                        final_sample.append((gal_id, multiplicity))
+                        final_count += multiplicity
+                    else:
+                        continue
+
+                for s in final_sample:
+                    total_num_galxies += 1
+
+                    gal_id = s[0]
+                    num_exposures = s[1]
+
+                    g = galaxy_dict[gal_id]
+                    total_prob += g.prob_fraction
+                    g.increment_exps(num_exposures)
+
+
+                # print(final_sample)
+                # print(final_count)
+                # test = 1
+
+
+            elif self.num_exposures == 3:
+
+                # test_n1_pixels = [9001088, 9066655, 9078943, 9066656, 9058477, 9029757]
+                # test_n2_pixels = [9058458, 8972436, 8927368]
+                # test_n3_pixels = [8607874, 9033873]
+                #
+                # contained_pixels = []
+                # for i in test_n1_pixels:
+                #     contained_pixels.append(pixel_dict[i])
+                # for i in test_n2_pixels:
+                #     contained_pixels.append(pixel_dict[i])
+                # for i in test_n3_pixels:
+                #     contained_pixels.append(pixel_dict[i])
+
+                # get N=1 list x3
+                n1_galaxies = []
+                n1_weights = []
+                for p in contained_pixels:
+                    gals = list(p.get_available_galaxies_by_multiplicity(1))
+                    n1_galaxies += gals
+                    for g in gals:
+                        n1_weights.append(g.compute_weight(1))
+
+                ordered_indices_n1 = (-np.asarray(n1_weights)).argsort()
+                top_galaxies_n1 = list(np.asarray(n1_galaxies)[ordered_indices_n1])
+                top_weights_n1 = list(np.asarray(n1_weights)[ordered_indices_n1])
+
+                # get entire N=2 list -- assuming fewer than 3x370 galaxies in this bin...
+                n2_galaxies = []
+                n2_weights = []
+                for p in contained_pixels:
+                    gals = list(p.get_available_galaxies_by_multiplicity(2))
+                    n2_galaxies += gals
+                    for g in gals:
+                        n2_weights.append(g.compute_weight(2))
+
+                ordered_indices_n2 = (-np.asarray(n2_weights)).argsort()
+                top_galaxies_n2 = list(np.asarray(n2_galaxies)[ordered_indices_n2])
+                top_weights_n2 = list(np.asarray(n2_weights)[ordered_indices_n2])
+
+                # get entire N=3 list -- assuming fewer than 3x370 galaxies in this bin...
+                n3_galaxies = []
+                n3_weights = []
+                for p in contained_pixels:
+                    gals = list(p.get_available_galaxies_by_multiplicity(3))
+                    n3_galaxies += gals
+                    for g in gals:
+                        n3_weights.append(g.compute_weight(3))
+
+                ordered_indices_n3 = (-np.asarray(n3_weights)).argsort()
+                top_galaxies_n3 = list(np.asarray(n3_galaxies)[ordered_indices_n3])
+                top_weights_n3 = list(np.asarray(n3_weights)[ordered_indices_n3])
+
+                # print(top_weights_n1)
+                # print("\n")
+                # print(top_weights_n2)
+                # print("\n")
+                # print(top_weights_n3)
+
+                # bin running_top_galaxies by twos and check if any N=2 galaxy is > any two N=1 galaxies
+                for i, n2 in enumerate(top_weights_n2):
+
+                    found = False
+
+                    for j, (w1, w2) in enumerate(zip(top_weights_n1[:-1], top_weights_n1[1:])):
+                        combined_weight = w1 + w2
+
+                        if w1 == 0.0:
+                            continue
+                        elif n2 > combined_weight:
+                            top_weights_n1.insert(j, top_weights_n2[i])
+                            top_weights_n1.insert(j + 1, 0.0) # place holder
+
+                            top_galaxies_n1.insert(j, top_galaxies_n2[i])
+                            top_galaxies_n1.insert(j + 1, top_galaxies_n2[i])
+
+                            found = True
+                            break
+
+                    if not found:
+                        top_galaxies_n1.append(top_galaxies_n2[i])
+                        top_galaxies_n1.append(top_galaxies_n2[i])
+
+                        top_weights_n1.append(top_weights_n2[i])
+                        top_weights_n1.append(0.0)
+
+                # bin running_top_galaxies by twos and check if any N=2 galaxy is > any two N=1 galaxies
+                for i, n3 in enumerate(top_weights_n3):
+
+                    found = False
+
+                    for j, (w1, w2, w3) in enumerate(zip(top_weights_n1[:-2], top_weights_n1[1:-1], top_weights_n1[2:])):
+                        combined_weight = w1 + w2 + w3
+                        if w1 == 0.0:
+                            # Don't check vs the w2 placeholder
+                            continue
+                        elif n3 > combined_weight:
+
+                            top_weights_n1.insert(j, top_weights_n3[i])
+                            top_weights_n1.insert(j + 1, 0.0) # place holder
+                            top_weights_n1.insert(j + 2, 0.0)  # place holder
+
+                            top_galaxies_n1.insert(j, top_galaxies_n3[i])
+                            top_galaxies_n1.insert(j + 1, top_galaxies_n3[i])
+                            top_galaxies_n1.insert(j + 2, top_galaxies_n3[i])
+
+                            found = True
+                            break
+
+                    if not found:
+                        top_galaxies_n1.append(top_galaxies_n3[i])
+                        top_galaxies_n1.append(top_galaxies_n3[i])
+                        top_galaxies_n1.append(top_galaxies_n3[i])
+
+                        top_weights_n1.append(top_weights_n3[i])
+                        top_weights_n1.append(0.0)
+                        top_weights_n1.append(0.0)
+
+                # print("\n")
+                # print(top_weights_n1)
+
+                # Get final list.
+                ordered_galaxies = OrderedDict()
+                for g in top_galaxies_n1:
+                    if g.galaxy_id not in ordered_galaxies:
+                        ordered_galaxies[g.galaxy_id] = 0
+                    ordered_galaxies[g.galaxy_id] += 1
+
+                # pprint.pprint(ordered_galaxies)
+                final_sample = []
+                final_count = 0
+                for gal_id, multiplicity in ordered_galaxies.items():
+                    if (final_count + multiplicity) <= total_fibers:
+                        final_sample.append((gal_id, multiplicity))
+                        final_count += multiplicity
+                    else:
+                        continue
+
+                for s in final_sample:
+                    total_num_galxies += 1
+
+                    gal_id = s[0]
+                    num_exposures = s[1]
+
+                    g = galaxy_dict[gal_id]
+                    total_prob += g.prob_fraction
+                    g.increment_exps(num_exposures)
+
+                test = 1
+
+
+
+
+
+
+
+
+            else:
+                raise Exception("Too many exposures!")
+
+            return total_num_galxies, total_prob
+
+
+            # Read region file
+    filename = 'test2.reg'
+    filepath = path_format.format(ps1_strm_dir, filename)
+
+    aaomega_detector = Detector("2dF", detector_width_deg=None, detector_height_deg=None, detector_radius_deg=1.05)
+    aaomega_tiles = []
+    with open(filepath, 'r') as f:
+        lines = f.readlines()
+
+        for l in lines:
+            if "circle(" in l:
+                # EX: circle(0:52:11.133, -25:43:00.494, 3780.000") # color=red
+                tup_str = l.split("{")[1].split("}")[0]
+                tile_tup = tup_str.split(",")
+                tile_num = int(tile_tup[0])
+                exp_num = int(tile_tup[1])
+
+                tokens = l.replace("circle(", "").replace("\") # color=red text={%s}\n" % tup_str, "").split(",")
+                ra = tokens[0].strip()
+                dec = tokens[1].strip()
+                c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
+                radius_deg = float(tokens[2])/3600. # input in arcseconds
+
+                aaomega_tiles.append(AAOmega_Tile(c.ra.degree, c.dec.degree, map_nside, radius_deg, num_exposures=exp_num,
+                                                  tile_num=tile_num))
+                # aaomega_tiles.append(AAOmega_Tile(c.ra.degree, c.dec.degree, map_nside, radius_deg, num_exposures=3))
+                # # aaomega_tiles.append(AAOmega_Tile(c.ra.degree, c.dec.degree, map_nside, radius_deg, num_exposures=2))
+                # break
+            elif "polygon" in l:
+                poly_vertices = []
+
+                # EX: polygon(1:28:03.984,-33:49:25.649, ... 1:28:14.531,-33:46:44.047)
+                tokens = l.replace("polygon(", "").replace(")\n", "").split(",")
+
+                i = 0
+                while i < len(tokens):
+                    ra = tokens[i]
+                    dec = tokens[i + 1]
+                    c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
+                    poly_vertices.append([c.ra.degree, c.dec.degree])
+                    i += 2
+
+                localization_poly.append(SQL_Polygon([geometry.Polygon(poly_vertices)], aaomega_detector))
+
+
+    total_exps = 0
+    total_slews = 0
+    sortedTiles = sorted(aaomega_tiles, key=lambda x: x.tile_num)
+    all_gals, all_prob = 0, 0
+    for t in sortedTiles:
+        total_slews += 1
+        total_exps += t.num_exposures
+
+        gals, prob = t.compute_best_target()
+        all_gals += gals
+        all_prob += prob
+        print("Tile #%s (%s exps): %s; %s" % (t.tile_num, t.num_exposures, gals, prob))
+
+    print("\n")
+    print(all_gals, all_prob)
+    total_hours = (total_exps*40 + total_slews*15)/60.
+    total_nights = total_hours/11.0
+    print("Total hours: %0.2f; total 11 hour nights: %0.2f" % (total_hours, total_nights))
+
+
+    # gals1, prob1 = aaomega_tiles[0].compute_best_target()
+    #
+    # gals2, prob2 = aaomega_tiles[1].compute_best_target()
+    # print(gals2, prob2)
+    # #
+    # print(gals1+gals2, prob1+prob2)
+    # print("\n\n\n\n")
+    print("\n")
+    print("\n")
+    print("\n")
+    print("\n")
+    print("\n")
+    print("\n")
+    raise Exception("Strop")
+
+
+
+
+
+
+
+    # Plot regions as a test
+    fig = plt.figure(figsize=(10, 10), dpi=1000)
+    ax = fig.add_subplot(111)
+
+    m = Basemap(projection='stere',
+                lon_0=15.0,
+                lat_0=-20.0,
+                llcrnrlat=-35.5,
+                urcrnrlat=-19.5,
+                llcrnrlon=8.0,
+                urcrnrlon=25.0)
+
+    for pix_index, p in pixel_dict.items():
+        p.plot(m, ax, edgecolor="black", facecolor="None", linewidth="0.5", alpha=0.15)
+
+    for l in localization_poly:
+        l.plot(m, ax, edgecolor='green', linewidth=1.5, facecolor='None')
+
+    for t in aaomega_tiles:
+        t.plot(m, ax, edgecolor="red", facecolor="None", linewidth="1.0")
+
+
+
+    # region Draw axes
+    # draw parallels.
+    sm_label_size = 18
+    label_size = 28
+    title_size = 36
+
+    _90_x1 = 0.77
+    _90_y1 = 0.558
+
+    _90_x2 = 0.77
+    _90_y2 = 0.40
+
+    _90_text_y = 0.37
+    _90_text_x = 0.32
+
+    _50_x1 = 0.60
+    _50_y1 = 0.51
+
+    _50_x2 = 0.48
+    _50_y2 = 0.40
+
+    _50_text_y = 0.37
+    _50_text_x = 0.64
+
+    parallels = list(np.arange(-90., 90., 10.))
+    dec_ticks = m.drawparallels(parallels, labels=[0, 1, 0, 0])
+    for i, tick_obj in enumerate(dec_ticks):
+        a = coord.Angle(tick_obj, unit=u.deg)
+
+        for text_obj in dec_ticks[tick_obj][1]:
+            direction = '+' if a.dms[0] > 0.0 else '-'
+            text_obj.set_text(r'${0}{1:0g}^{{\degree}}$'.format(direction, np.abs(a.dms[0])))
+            text_obj.set_size(sm_label_size)
+            x = text_obj.get_position()[0]
+
+            new_x = x * (1.0 + 0.08)
+            text_obj.set_x(new_x)
+
+    # draw meridians
+    meridians = np.arange(0., 360., 7.5)
+    ra_ticks = m.drawmeridians(meridians, labels=[0, 0, 0, 1])
+
+    RA_label_dict = {
+        7.5: r'$00^{\mathrm{h}}30^{\mathrm{m}}$',
+        15.0: r'$01^{\mathrm{h}}00^{\mathrm{m}}$',
+        22.5: r'$01^{\mathrm{h}}30^{\mathrm{m}}$',
+    }
+
+    for i, tick_obj in enumerate(ra_ticks):
+        for text_obj in ra_ticks[tick_obj][1]:
+            if tick_obj in RA_label_dict:
+                text_obj.set_text(RA_label_dict[tick_obj])
+                text_obj.set_size(sm_label_size)
+
+    for axis in ['top', 'bottom', 'left', 'right']:
+        ax.spines[axis].set_linewidth(2.0)
+
+    ax.invert_xaxis()
+
+    plt.ylabel(r'$\mathrm{Declination}$', fontsize=label_size, labelpad=36)
+    plt.xlabel(r'$\mathrm{Right\;Ascension}$', fontsize=label_size, labelpad=30)
+    # endregion
+
+    fig.savefig('GW190814_PS1_region_test.png', bbox_inches='tight')  # ,dpi=840
+    plt.close('all')
+    print("... Done.")
 
 
 
