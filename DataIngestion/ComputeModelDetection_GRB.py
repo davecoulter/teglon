@@ -535,8 +535,8 @@ class Teglon:
             g = np.asarray(model_table['sdss_g'][mask])
             r = np.asarray(model_table['sdss_r'][mask])
             i = np.asarray(model_table['sdss_i'][mask])
-            # clear = np.asarray(model_table['Clear'][mask])
-            clear = np.asarray(model_table['sdss_r'][mask])
+            clear = np.asarray(model_table['Clear'][mask])
+            # clear = np.asarray(model_table['sdss_r'][mask])
 
             model_props = model_table.meta['comment']
             model_type = model_props[0].split("=")[1]
@@ -983,6 +983,17 @@ class Teglon:
         print("Integration time: %s [seconds]" % (mp_end - mp_start))
         # endregion
 
+
+
+
+
+
+
+
+
+
+
+
         # region Serialization
         # Finally, get the highest valued integration, and sum
         running_sums = {}  # model:band:value
@@ -1066,6 +1077,13 @@ class Teglon:
                                                                 self.options.sub_dir,
                                                                 self.options.batch_dir),
                            overwrite=True, format='ascii.ecsv')
+
+
+
+
+
+
+
         # endregion
 
 if __name__ == "__main__":

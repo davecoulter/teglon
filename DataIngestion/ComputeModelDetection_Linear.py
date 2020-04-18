@@ -90,6 +90,7 @@ from scipy import stats
 from astropy.table import Table
 import pdb
 import re
+from functools import reduce
 
 # endregion
 
@@ -113,8 +114,8 @@ config["data_dir"] = "./"
 
 # Generate all pixel indices
 cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
-# GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
-GW190814_t_0 = 58598.346134259256  # time of GW190425 merger
+GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
+# GW190814_t_0 = 58598.346134259256  # time of GW190425 merger
 
 
 # endregion
@@ -825,6 +826,12 @@ class Teglon:
 
         for rz in resolved_z:
             map_pixel_dict_new[rz[0]].z = rz[1]
+
+        # # DEBUG
+        # for ii in initial_integrands:
+        #     return_tup = initial_z(ii)
+        #     map_pixel_dict_new[return_tup[0]].z = return_tup[1]
+
         it2 = time.time()
 
         print("... finished z-cosmo pool: %s [seconds]" % (it2 - it1))
@@ -898,49 +905,16 @@ class Teglon:
             WHERE
                 HealpixMap_id = %s and 
                 Detector_id = %s and 
-                Mag_Lim IS NOT NULL 
+                Mag_Lim IS NOT NULL
         '''
 
         observed_tiles = []
 
-        print("\nLoading Swope's Observed Tiles...")
-        ot_result = query_db([observed_tile_select % (healpix_map_id, swope.id)])[0]
-        for ot in ot_result:
-            t = Tile(float(ot[3]), float(ot[4]), swope.deg_width, swope.deg_height, healpix_map_nside,
-                     tile_id=int(ot[0]))
-            t.field_name = ot[2]
-            t.mjd = float(ot[8])
-            t.mag_lim = float(ot[10])
-            t.band_id = int(ot[7])
 
-            observed_tiles.append(t)
-        print("Loaded %s %s tiles..." % (len(ot_result), swope.name))
 
-        print("\nLoading Nickel's Observed Tiles...")
-        ot_result = query_db([observed_tile_select % (healpix_map_id, nickel.id)])[0]
-        for ot in ot_result:
-            t = Tile(float(ot[3]), float(ot[4]), nickel.deg_width, nickel.deg_height, healpix_map_nside,
-                     tile_id=int(ot[0]))
-            t.field_name = ot[2]
-            t.mjd = float(ot[8])
-            t.mag_lim = float(ot[10])
-            t.band_id = int(ot[7])
 
-            observed_tiles.append(t)
-        print("Loaded %s %s tiles..." % (len(ot_result), nickel.name))
 
-        print("\nLoading Thacher's Observed Tiles...")
-        ot_result = query_db([observed_tile_select % (healpix_map_id, thacher.id)])[0]
-        for ot in ot_result:
-            t = Tile(float(ot[3]), float(ot[4]), thacher.deg_width, thacher.deg_height, healpix_map_nside,
-                     tile_id=int(ot[0]))
-            t.field_name = ot[2]
-            t.mjd = float(ot[8])
-            t.mag_lim = float(ot[10])
-            t.band_id = int(ot[7])
 
-            observed_tiles.append(t)
-        print("Loaded %s %s tiles..." % (len(ot_result), thacher.name))
 
         print("\nLoading KAIT's Observed Tiles...")
         ot_result = query_db([observed_tile_select % (healpix_map_id, kait.id)])[0]
@@ -964,6 +938,46 @@ class Teglon:
             t.band_id = int(ot[7])
             observed_tiles.append(t)
         print("Loaded %s %s tiles..." % (len(ot_result), sinistro.name))
+
+        print("\nLoading Thacher's Observed Tiles...")
+        ot_result = query_db([observed_tile_select % (healpix_map_id, thacher.id)])[0]
+        for ot in ot_result:
+            t = Tile(float(ot[3]), float(ot[4]), thacher.deg_width, thacher.deg_height, healpix_map_nside,
+                     tile_id=int(ot[0]))
+            t.field_name = ot[2]
+            t.mjd = float(ot[8])
+            t.mag_lim = float(ot[10])
+            t.band_id = int(ot[7])
+
+            observed_tiles.append(t)
+        print("Loaded %s %s tiles..." % (len(ot_result), thacher.name))
+
+        print("\nLoading Nickel's Observed Tiles...")
+        ot_result = query_db([observed_tile_select % (healpix_map_id, nickel.id)])[0]
+        for ot in ot_result:
+            t = Tile(float(ot[3]), float(ot[4]), nickel.deg_width, nickel.deg_height, healpix_map_nside,
+                     tile_id=int(ot[0]))
+            t.field_name = ot[2]
+            t.mjd = float(ot[8])
+            t.mag_lim = float(ot[10])
+            t.band_id = int(ot[7])
+
+            observed_tiles.append(t)
+        print("Loaded %s %s tiles..." % (len(ot_result), nickel.name))
+
+        print("\nLoading Swope's Observed Tiles...")
+        ot_result = query_db([observed_tile_select % (healpix_map_id, swope.id)])[0]
+        for ot in ot_result:
+            t = Tile(float(ot[3]), float(ot[4]), swope.deg_width, swope.deg_height, healpix_map_nside,
+                     tile_id=int(ot[0]))
+            t.field_name = ot[2]
+            t.mjd = float(ot[8])
+            t.mag_lim = float(ot[10])
+            t.band_id = int(ot[7])
+
+            observed_tiles.append(t)
+        print("Loaded %s %s tiles..." % (len(ot_result), swope.name))
+
         # endregion
 
         print("Getting Detector-Band pairs...")
@@ -1000,6 +1014,15 @@ class Teglon:
                     pix_synopsis_new.measured_bands.append(band_name)
                     pix_synopsis_new.delta_mjds[band_name] = {}
                     pix_synopsis_new.lim_mags[band_name] = {}
+
+                # DEBUG
+                if t.mjd in pix_synopsis_new.lim_mags[band_name]:
+                    if pix_synopsis_new.lim_mags[band_name][t.mjd] != t.mag_lim:
+                        print("Collision! Tile: %s" % t)
+                        print("MJD: %s" % t.mjd)
+                        print("Previous mag lim: %s" % pix_synopsis_new.lim_mags[band_name][t.mjd])
+                        print("New mag lim: %s" % t.mag_lim)
+                # DEBUG
 
                 # time-dilate the delta_mjd, which is used to get the Abs Mag LC point
                 pix_synopsis_new.delta_mjds[band_name][t.mjd] = (t.mjd - GW190814_t_0) / (1.0 + pix_synopsis_new.z)
@@ -1062,6 +1085,16 @@ class Teglon:
         integrated_pixels = pool.imap_unordered(integrate_pixel,
                                                 get_pix_models(map_pixel_dict_new, models),
                                                 chunksize=1000)
+
+        # integrated_pixels = []
+        # for p in get_pix_models(map_pixel_dict_new, models):
+        #     integrated_pixels.append(integrate_pixel(p))
+
+
+
+
+
+
 
         # integrated_pixels = []
         # model_count = len(models)
@@ -1170,64 +1203,186 @@ class Teglon:
         print("Pool time: %s [seconds]" % (pool_end - pool_start))
         # endregion
 
-        # region Serialization
-        # NEW
-        # Finally, get the highest valued integration, and sum
-        running_sums = {}  # model:band:value
-        # pixels_to_plot = {} # model:band:pixel
 
-        for pix_index, pix_synopsis in map_pixel_dict_new.items():
-            for band in pix_synopsis.measured_bands:
-                for model_param_tuple, model_dict in models.items():
 
-                    pix_max = 0.0
-                    if model_param_tuple not in running_sums:
-                        running_sums[model_param_tuple] = {}
 
-                    try:
-                        t = running_sums[model_param_tuple][band]
-                    except:
-                        running_sums[model_param_tuple][band] = 0.0
+        ## region Serialization
+        ## Finally, get the highest valued integration, and sum
+        # ## OLD (Take Highest Pixel)
+        # running_sums = {}  # model:band:value
+        # for pix_index, pix_synopsis in map_pixel_dict_new.items():
+        #     for band in pix_synopsis.measured_bands:
+        #         for model_param_tuple, model_dict in models.items():
+        #
+        #             pix_max = 0.0
+        #             if model_param_tuple not in running_sums:
+        #                 running_sums[model_param_tuple] = {}
+        #
+        #             try:
+        #                 t = running_sums[model_param_tuple][band]
+        #             except:
+        #                 running_sums[model_param_tuple][band] = 0.0
+        #
+        #             probs = []
+        #             for mjd, integrated_prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
+        #                 probs.append(integrated_prob)
+        #
+        #             pix_max = np.max(probs)
+        #             running_sums[model_param_tuple][band] += pix_max
+        #
+        # for model_param_tuple, band_dict in running_sums.items():
+        #     print("\nIntegrated prob to detect model (M=%s, dM=%s)" % model_param_tuple)
+        #
+        #     for band, running_sum in band_dict.items():
+        #         print("\t%s: %s" % (band, running_sum))
+        #
+        # ## Additional calculation -- for every pixel, just get the highest prob
+        # running_sums2 = {}
+        # for model_param_tuple, model_dict in models.items():
+        #
+        #     running_sums2[model_param_tuple] = 0.0
+        #
+        #     for pix_index, pix_synopsis in map_pixel_dict_new.items():
+        #
+        #         pix_max = 0.0
+        #         probs = []
+        #
+        #         for band in pix_synopsis.measured_bands:
+        #             for mjd, integrated_prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
+        #                 probs.append(integrated_prob)
+        #
+        #         pix_max = np.max(probs)
+        #         running_sums2[model_param_tuple] += pix_max
+        #
+        # # Build ascii.ecsv formatted output
+        # cols = ['M', 'dM', 'Prob']
+        # dtype = ['f8', 'f8', 'f8']
+        # result_table = Table(dtype=dtype, names=cols)
+        #
+        # for model_param_tuple, prob in running_sums2.items():
+        #     print("\nCombined Integrated prob to detect model (M=%s, dM=%s)" % model_param_tuple)
+        #     print("\t%s" % prob)
+        #     result_table.add_row([model_param_tuple[0], model_param_tuple[1], prob])
+        #
+        # result_table.write("%s/Detection_Results_Linear_%s.prob" % (formatted_model_output_dir, self.options.sub_dir),
+        #                    overwrite=True, format='ascii.ecsv')
 
-                    probs = []
-                    for mjd, integrated_prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
-                        probs.append(integrated_prob)
+        ## NEW (Take binomial product of chance seeing it in each epoch)
 
-                    pix_max = np.max(probs)
-                    running_sums[model_param_tuple][band] += pix_max
+        # probability by model by band by pixel, for all epochs per pixel
+        probs_by_model_band_pix_index = {}
 
-        # pixels_to_plot[] append(Pixel_Element(pix_index, healpix_map_nside, pix_max))
+        # summed pixel probability by model and band
+        probs_by_model_band = {}
 
-        for model_param_tuple, band_dict in running_sums.items():
-            print("\nIntegrated prob to detect model (M=%s, dM=%s)" % model_param_tuple)
+        # final probability by model
+        net_prob_by_model = {}
 
-            for band, running_sum in band_dict.items():
-                print("\t%s: %s" % (band, running_sum))
-
-        ## Additional calculation -- for every pixel, just get the highest prob
-        running_sums2 = {}
         for model_param_tuple, model_dict in models.items():
 
-            running_sums2[model_param_tuple] = 0.0
+            # Initialize the model key for each dictionary
+            if model_param_tuple not in net_prob_by_model:
+                net_prob_by_model[model_param_tuple] = {}
+
+            if model_param_tuple not in probs_by_model_band:
+                probs_by_model_band[model_param_tuple] = {}
+
+            if model_param_tuple not in probs_by_model_band_pix_index:
+                probs_by_model_band_pix_index[model_param_tuple] = {}
+
 
             for pix_index, pix_synopsis in map_pixel_dict_new.items():
-
-                pix_max = 0.0
-                probs = []
-
                 for band in pix_synopsis.measured_bands:
-                    for mjd, integrated_prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
-                        probs.append(integrated_prob)
 
-                pix_max = np.max(probs)
-                running_sums2[model_param_tuple] += pix_max
+                    # Initialize the band key for each dictionary
+                    if band not in probs_by_model_band_pix_index[model_param_tuple]:
+                        probs_by_model_band_pix_index[model_param_tuple][band] = {}
+
+                    if band not in probs_by_model_band[model_param_tuple]:
+                        probs_by_model_band[model_param_tuple][band] = {}
+
+                    # sanity -- if the pixel prob is itself 0.0, we can just skip
+                    if pix_synopsis.prob_2D <= 0:
+                        probs_by_model_band_pix_index[model_param_tuple][band][pix_index] = 0.0
+                        continue
+
+
+                    # For each pixel:
+                    #   take the compliment from each epoch's integrated probability
+                    #   take the product of these compliments (the product of the individual marginal probabilities of a non-detection)
+                    #   take the compliment of this join marginal probability to find the prob of at least one detection
+
+                    test = 1.0 - reduce(lambda y, z: y * z,
+                                     map(lambda x: (1.0 - x),
+                                         [p[1] for p in pix_synopsis.best_integrated_probs[model_param_tuple][band].items()]))
+
+                    product_of_compliments = 1.0
+
+                    test_probs = []
+                    for mjd, prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
+                        # product_of_compliments *= (1.0 - prob)
+                        # product_of_compliments *= (pix_synopsis.prob_2D - prob)
+                        product_of_compliments *= (1.0 - prob/pix_synopsis.prob_2D)
+                        test_probs.append(prob)
+
+                    # compliment_of_product_of_compliments = 1.0 - product_of_compliments
+                    # compliment_of_product_of_compliments = pix_synopsis.prob_2D - product_of_compliments
+                    compliment_of_product_of_compliments = pix_synopsis.prob_2D * (1 - product_of_compliments)
+                    # print(np.max(test_probs), compliment_of_product_of_compliments)
+
+                    probs_by_model_band_pix_index[model_param_tuple][band][pix_index] = compliment_of_product_of_compliments
+
+
+            # Sum all pixels for a given band and model, that makes up the per model, per band prob
+            for band, pix_prob_dict in probs_by_model_band_pix_index[model_param_tuple].items():
+
+                test2 = reduce(lambda x, y: x + y, [p[1] for p in pix_prob_dict.items()])
+
+                summed_prob = 0.0
+                for pix_index, prob in pix_prob_dict.items():
+                    summed_prob += prob
+
+                probs_by_model_band[model_param_tuple][band] = summed_prob
+
+                print("Summed prob for band [%s]: %s" % (band, summed_prob))
+
+
+
+            # Finally, as above, take the compliment of the product of the compliments for each band
+            # to compute the probability of at least 1 detection in any band
+            test3 = 1.0 - reduce(lambda y, z: y * z,
+                             map(lambda x: (1.0 - x),
+                                 [p[1] for p in probs_by_model_band[model_param_tuple].items()]))
+
+
+            total_covered_prob = 0.0
+            for pix_index, pix_synopsis in map_pixel_dict_new.items():
+                total_covered_prob += pix_synopsis.prob_2D
+
+            print("Total covered prob: %s" % total_covered_prob)
+
+            net_product_of_compliments = 1.0
+            for band, sum_prob in probs_by_model_band[model_param_tuple].items():
+                # net_product_of_compliments *= (total_covered_prob - sum_prob)
+                net_product_of_compliments *= (1.0 - sum_prob/total_covered_prob)
+
+            # net_compliment_of_product_of_compliments = total_covered_prob - net_product_of_compliments
+            net_compliment_of_product_of_compliments = total_covered_prob * (1.0 - net_product_of_compliments)
+
+            print("Total model prob: %s" % net_compliment_of_product_of_compliments)
+
+            net_prob_by_model[model_param_tuple] = net_compliment_of_product_of_compliments
+
+            test4 = 1
+
+
 
         # Build ascii.ecsv formatted output
         cols = ['M', 'dM', 'Prob']
         dtype = ['f8', 'f8', 'f8']
         result_table = Table(dtype=dtype, names=cols)
 
-        for model_param_tuple, prob in running_sums2.items():
+        for model_param_tuple, prob in net_prob_by_model.items():
             print("\nCombined Integrated prob to detect model (M=%s, dM=%s)" % model_param_tuple)
             print("\t%s" % prob)
             result_table.add_row([model_param_tuple[0], model_param_tuple[1], prob])
@@ -1235,9 +1390,6 @@ class Teglon:
         result_table.write("%s/Detection_Results_Linear_%s.prob" % (formatted_model_output_dir, self.options.sub_dir),
                            overwrite=True, format='ascii.ecsv')
 
-        # result_table.write("%s/Detection_Results_Linear_to_GRB.prob" % formatted_model_output_dir,
-        #                    overwrite=True, format='ascii.ecsv')
-        # endregion
 
 
 if __name__ == "__main__":
