@@ -23,3 +23,5 @@ DataIngestion/*.fits
 DataIngestion/*.fits,0
 DataIngestion/*.fits,1
 DataIngestion/*.txt
+.idea/*
+DataIngestion/IMF_Weighted_BNS/*
