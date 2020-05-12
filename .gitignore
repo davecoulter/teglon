@@ -25,3 +25,4 @@ DataIngestion/*.fits,1
 DataIngestion/*.txt
 .idea/*
 DataIngestion/IMF_Weighted_BNS/*
+Jon/*
