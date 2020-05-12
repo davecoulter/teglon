@@ -91,6 +91,8 @@ from astropy.table import Table
 import pdb
 import re
 from functools import reduce
+from astropy.time import Time
+import pytz
 
 # endregion
 
@@ -114,7 +116,7 @@ config["data_dir"] = "./"
 
 # Generate all pixel indices
 cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
-GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
+# GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
 # GW190814_t_0 = 58598.346134259256  # time of GW190425 merger
 
 
@@ -575,6 +577,10 @@ class Teglon:
         parser.add_option('--sub_dir', default="1", type="str",
                           help='Linear Model sub directory (for batching)')
 
+        parser.add_option('--merger_time_MJD', default="58709.882824224536", type="float",
+                          help='''Time of the merger in MJD. This is used to compute where on the light curve we are. 
+                                  Default to GW190814''')
+
         return (parser)
 
     def main(self):
@@ -586,6 +592,10 @@ class Teglon:
         prep_start = time.time()
 
         is_error = False
+
+        merger_time = self.options.merger_time_MJD
+        t = Time(merger_time, format='mjd')
+        print("** Running models for MJD: %s; UTC: %s **" % (merger_time, t.to_datetime(timezone=pytz.utc)))
 
         # Parameter checks
         if self.options.gw_id == "":
@@ -1025,7 +1035,7 @@ class Teglon:
                 # DEBUG
 
                 # time-dilate the delta_mjd, which is used to get the Abs Mag LC point
-                pix_synopsis_new.delta_mjds[band_name][t.mjd] = (t.mjd - GW190814_t_0) / (1.0 + pix_synopsis_new.z)
+                pix_synopsis_new.delta_mjds[band_name][t.mjd] = (t.mjd - merger_time) / (1.0 + pix_synopsis_new.z)
                 pix_synopsis_new.lim_mags[band_name][t.mjd] = (t.mag_lim)
 
         print("\nInitializing %s models..." % len(models))

@@ -315,7 +315,7 @@ load_index = False
 generate_uniquePspsOBids_input = False
 get_photo_z = False
 load_photo_z = False
-get_map_pixels_in_northern_and_southern_95th = False
+get_map_pixels_in_northern_and_southern_95th = True1
 create_galaxy_pixel_relations = False
 
 
@@ -537,16 +537,26 @@ if get_map_pixels_in_northern_and_southern_95th:
 
     # Sort Pixels by prob desc
     sorted_pix = sorted(pixels, key=lambda p:p.prob, reverse=True)
-    threshold = 0.95
-    running_prob = 0.0
+    threshold1 = 0.95
+    threshold2 = 0.5
+
     top_95th = []
+    top_50th = []
+    running_prob = 0.0
     for p in sorted_pix:
-        if running_prob <= threshold:
+        if running_prob <= threshold1:
             running_prob += p.prob
             top_95th.append(p)
 
+    running_prob = 0.0
+    for p in sorted_pix:
+        if running_prob <= threshold2:
+            running_prob += p.prob
+            top_50th.append(p)
+
     print("Net Prob: %0.4f" % running_prob)
     print("Total NSIDE=1024 pixels in 95th: %s" % len(top_95th))
+    print("Total NSIDE=1024 pixels in 50th: %s" % len(top_50th))
 
     # Cut pixels down to northern 95th
     # theta, phi = hp.pix2ang(nside=map_nside, ipix=[p.index for p in top_95th])
@@ -577,6 +587,11 @@ if get_map_pixels_in_northern_and_southern_95th:
     print("Number of pixels in southern 95th: %s" % len(southern_95th))
     print("Area sq deg southern 95th: %s" % s_area)
 
+    _50_area = len(top_50th) * hp.nside2pixarea(map_nside, degrees=True)
+    print("Contained prob in 50th: %0.4f" % np.sum([p.prob for p in top_50th]))
+    print("Number of pixels in 50th: %s" % len(top_50th))
+    print("Area sq deg southern 50th: %s" % _50_area)
+
     northern_95th_pixel_ids = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
     with open(northern_95th_pixel_ids, 'w') as csvfile:
         csvwriter = csv.writer(csvfile, delimiter=',')
@@ -589,6 +604,13 @@ if get_map_pixels_in_northern_and_southern_95th:
         csvwriter = csv.writer(csvfile, delimiter=',')
         csvwriter.writerow(("pixel_id",))
         for p in southern_95th:
+            csvwriter.writerow((p.id,))
+
+    _50th_pixel_ids = path_format.format(ps1_strm_dir, "50th_pixel_ids.txt")
+    with open(_50th_pixel_ids, 'w') as csvfile:
+        csvwriter = csv.writer(csvfile, delimiter=',')
+        csvwriter.writerow(("pixel_id",))
+        for p in top_50th:
             csvwriter.writerow((p.id,))
 
 if create_galaxy_pixel_relations:

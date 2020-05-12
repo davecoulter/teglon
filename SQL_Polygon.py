@@ -17,7 +17,11 @@ class SQL_Polygon(Telgon_Shape):
         self.detector = detector
         self.__polygon = polygon
 
-        self.__radius_proxy = 5.0 * np.sqrt(self.detector.deg_width * self.detector.deg_height / np.pi)
+        self.__radius_proxy = None
+        if not (self.detector.deg_width is None and self.detector.deg_height is None):
+            self.__radius_proxy = 5.0 * np.sqrt(self.detector.deg_width * self.detector.deg_height / np.pi)
+        # self.__radius_proxy = 5.0 * np.sqrt(self.detector.deg_width * self.detector.deg_height / np.pi)
+
         self.__query_polygon = None
         self.__query_polygon_string = None
 

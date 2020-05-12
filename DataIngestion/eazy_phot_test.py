@@ -40,7 +40,7 @@ from scipy.special import erf
 from scipy.optimize import minimize, minimize_scalar
 import scipy.stats as st
 from scipy.integrate import simps
-from scipy.interpolate import interp2d
+from scipy.interpolate import interp1d, interp2d
 
 import astropy as aa
 from astropy import cosmology
@@ -68,6 +68,7 @@ from Tile import *
 from SQL_Polygon import *
 from Pixel_Element import *
 from Completeness_Objects import *
+from AAOmega_Objects import *
 
 import psutil
 import shutil
@@ -82,9 +83,11 @@ import json
 
 import MySQLdb as my
 from scipy.stats import pearsonr
-from scipy.interpolate import interp1d, interp2d
+import random
 
-import pprint
+from scipy.stats import norm, gaussian_kde, mode
+from scipy.integrate import trapz
+from functools import reduce
 # endregion
 
 # region config
@@ -319,6 +322,9 @@ test_photozs = False
 
 test_curve_fit = False
 read_region_poly = True
+h0_calc_test_single = False
+h0_calc_test_sample = False
+h0_calc_test_multiple_sample = False
 
 
 
@@ -1136,6 +1142,9 @@ if test_curve_fit:
 
 if read_region_poly:
 
+    path_format = "{}/{}"
+    ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
+
     # region load ozDES
     ozDES_data = OrderedDict()
     ozDES_models = OrderedDict()
@@ -1192,65 +1201,77 @@ if read_region_poly:
 
             ozDES_models[key[0]][key[1]] = model
 
+    def get_osDES_model(kron_r_mag):
+        model = ozDES_models[_20_0_20_5][Q3]
+        required_exps = 1
 
+        if r >= 20.5 and r < 21.0:
+            model = ozDES_models[_20_5_21_0][Q3]
+            required_exps = 2
+        elif r >= 21.0 and r < 21.5:
+            model = ozDES_models[_21_0_21_5][Q3]
+            required_exps = 3
+        elif r >= 21.5:
+            model = ozDES_models[_21_5_22_0][Q3]
+            required_exps = 4
+
+        return required_exps, model
     # endregion
 
-    class AAOmega_Galaxy():
-        def __init__(self, galaxy_id, ra, dec, prob_galaxy, z, kron_r, pix_index, prob_fraction = 0.0):
-            self.galaxy_id = galaxy_id
-            self.ra = ra
-            self.dec = dec
-            self.prob_fraction = prob_fraction
-            self.prob_galaxy = prob_galaxy
-            self.z = z
-            self.kron_r = kron_r
-            self.pix_index = pix_index
-            self.efficiency_func = ozDES_models[_20_0_20_5][Q3]
-            self.num_exps = 0
-            self.available = True
-            self.required_exps = 1
-
-            if self.kron_r >= 20.5 and self.kron_r < 21.0:
-                self.required_exps = 2
-                self.efficiency_func = ozDES_models[_20_5_21_0][Q3]
-            elif self.kron_r >= 21.0 and self.kron_r < 21.5:
-                self.required_exps = 3
-                self.efficiency_func = ozDES_models[_21_0_21_5][Q3]
-            elif self.kron_r >= 21.5:
-                self.required_exps = 4
-                self.efficiency_func = ozDES_models[_21_5_22_0][Q3]
-
-        def compute_weight(self, num_exps):
-            MIN_EXP = 40  # minutes
-            total_exp_time = num_exps * MIN_EXP
-            efficiency = self.efficiency_func(total_exp_time)
-            metric = efficiency * self.prob_galaxy * self.prob_fraction
-            return metric
-
-        def increment_exps(self, num_exps):
-            self.num_exps += num_exps
-            self.available = self.num_exps < self.required_exps
-
-    class AAOmega_Pixel(Pixel_Element):
-        def __init__(self, index, nside, prob, pixel_id=None, mean_dist=None, stddev_dist=None):
-            Pixel_Element.__init__(self, index, nside, prob, pixel_id, mean_dist, stddev_dist)
-            self.galaxy_ids = []
-
-        def get_available_galaxies_by_multiplicity(self, N):
-            for g_id in self.galaxy_ids:
-                gal = galaxy_dict[g_id]
-                if gal.available and gal.required_exps == N:
-                    yield gal
 
     map_nside = 1024
-    localization_poly = []
-    northern_pixels = []
 
-    # Key dictionary off pixel index
-    pixel_dict = {}
+    # region Spin up AAOmega Pix and Galaxies
+    northern_95th_AAOmega_galaxy_dict_by_galaxy_id = {}
+    northern_95th_AAOmega_galaxy_dict_by_pixel_index = {}
+    # Get galaxies in north
+    good_candidate_ps1_galaxy_select = '''
+            SELECT
+                ps1.id as Galaxy_id, 
+                ps1.gaia_ra,
+                ps1.gaia_dec,
+                ps1.rMeanKronMag,
+                ps.z_phot0,
+                ps.prob_Galaxy,
+                hp.id as Pixel_id,
+                hp.Pixel_Index,
+                ps.z_photErr,
+                ps1.synth_B2
+            FROM 
+                PS1_Galaxy ps1
+            JOIN HealpixPixel_PS1_Galaxy hp_ps1 on hp_ps1.PS1_Galaxy_id = ps1.id
+            JOIN PS1_STRM ps on ps.uniquePspsOBid = ps1.uniquePspsOBid
+            JOIN HealpixPixel hp on hp.id = hp_ps1.HealpixPixel_id
+            WHERE 
+                ps1.GoodCandidate = 1 
+            '''
+    northern_95th_galaxy_result = query_db([good_candidate_ps1_galaxy_select])[0]
+    print("Returned %s galaxies" % len(northern_95th_galaxy_result))
+    for g in northern_95th_galaxy_result:
+        galaxy_id = int(g[0])
+        ra = float(g[1])
+        dec = float(g[2])
+        r = float(g[3])
+        z = float(g[4])
+        prob_Galaxy = float(g[5])
+        pix_id = int(g[6])
+        pix_index = int(g[7])
 
-    # region Load pixel_ids from file...
-    pixel_select = '''
+        z_err = float(g[8])
+        synth_B = float(g[9])
+
+        required_exps, osDES_model = get_osDES_model(r)
+        aaomega_galaxy = AAOmega_Galaxy(galaxy_id, ra, dec, prob_Galaxy, z, r, pix_index, required_exps, osDES_model,
+                                        z_photErr=z_err, synth_B=synth_B)
+
+        if pix_index not in northern_95th_AAOmega_galaxy_dict_by_pixel_index:
+            northern_95th_AAOmega_galaxy_dict_by_pixel_index[pix_index] = {}
+
+        northern_95th_AAOmega_galaxy_dict_by_pixel_index[pix_index][galaxy_id] = aaomega_galaxy
+        northern_95th_AAOmega_galaxy_dict_by_galaxy_id[galaxy_id] = aaomega_galaxy
+
+    northern_AAOmega_pixel_dict = {}
+    northern_95th_pixel_select = '''
         SELECT 
             id, 
             HealpixMap_id, 
@@ -1266,440 +1287,186 @@ if read_region_poly:
         FROM HealpixPixel 
         WHERE id IN (%s) 
     '''
-    northern_pixel_ids = []
-    northern_95th_pixel_ids = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
-    with open(northern_95th_pixel_ids, 'r') as csvfile:
+    northern_95th_pixel_ids = []
+    northern_95th_pixel_ids_file = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
+    with open(northern_95th_pixel_ids_file, 'r') as csvfile:
         csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
         next(csvreader)  # skip header
-
         for row in csvreader:
             id = row[0]
-            northern_pixel_ids.append(id)
-    pixel_result_north = query_db([pixel_select % ",".join(northern_pixel_ids)])[0]
-    print("Total NSIDE=1024 pixels in Northern 95th: %s" % len(pixel_result_north))
-
-    for m in pixel_result_north:
+            northern_95th_pixel_ids.append(id)
+    northern_95th_pixel_result = query_db([northern_95th_pixel_select % ",".join(northern_95th_pixel_ids)])[0]
+    print("Total NSIDE=1024 pixels in Northern 95th: %s" % len(northern_95th_pixel_result))
+    for m in northern_95th_pixel_result:
         pix_id = int(m[0])
         index = int(m[2])
         prob = float(m[3])
         dist = float(m[7])
         stddev = float(m[8])
-        p = AAOmega_Pixel(index, map_nside, prob, pixel_id=pix_id, mean_dist=dist, stddev_dist=stddev)
-        pixel_dict[index] = p
 
-    # Key dictionary off pixel index
-    galaxy_dict = {}
-    # Get galaxies in north
-    ps1_galaxy_select = '''
+        contained_galaxies_dict = {}
+        if index in northern_95th_AAOmega_galaxy_dict_by_pixel_index:
+            contained_galaxies_dict = northern_95th_AAOmega_galaxy_dict_by_pixel_index[index]
+
+            gal_count = len(contained_galaxies_dict)
+            for gal_id, gal in contained_galaxies_dict.items():
+                gal.prob_fraction = prob/gal_count
+
+        p = AAOmega_Pixel(index, map_nside, prob, contained_galaxies_dict, pixel_id=pix_id, mean_dist=dist, stddev_dist=stddev)
+        northern_AAOmega_pixel_dict[index] = p
+
+
+
+
+
+
+
+
+
+
+
+    _50_AAOmega_pixel_dict = {}
+    _50th_pixel_select = '''
+             SELECT 
+                 id, 
+                 HealpixMap_id, 
+                 Pixel_Index, 
+                 Prob, 
+                 Distmu, 
+                 Distsigma, 
+                 Distnorm, 
+                 Mean, 
+                 Stddev, 
+                 Norm, 
+                 N128_SkyPixel_id 
+             FROM HealpixPixel 
+             WHERE id IN (%s) 
+         '''
+    _50th_pixel_ids = []
+    _50th_pixel_ids_file = path_format.format(ps1_strm_dir, "50th_pixel_ids.txt")
+    with open(_50th_pixel_ids_file, 'r') as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+        next(csvreader)  # skip header
+        for row in csvreader:
+            id = row[0]
+            _50th_pixel_ids.append(id)
+
+    _50th_pixel_result = query_db([_50th_pixel_select % ",".join(_50th_pixel_ids)])[0]
+    print("Total NSIDE=1024 pixels in 50th: %s" % len(_50th_pixel_result))
+    for m in _50th_pixel_result:
+        pix_id = int(m[0])
+        index = int(m[2])
+        prob = float(m[3])
+        dist = float(m[7])
+        stddev = float(m[8])
+
+        _50_AAOmega_pixel_dict[index] = (pix_id, index, prob, dist, stddev)
+
+
+
+
+
+
+
+
+
+
+
+    southern_AAOmega_pixel_dict = {}
+    southern_95th_pixel_select = '''
         SELECT
-            ps1.id as Galaxy_id, 
-            ps1.gaia_ra,
-            ps1.gaia_dec,
-            ps1.rMeanKronMag,
-            ps.z_phot0,
-            ps.prob_Galaxy,
-            hp.id as Pixel_id,
-            hp.Pixel_Index
-        FROM 
-            PS1_Galaxy ps1
-        JOIN HealpixPixel_PS1_Galaxy hp_ps1 on hp_ps1.PS1_Galaxy_id = ps1.id
-        JOIN PS1_STRM ps on ps.uniquePspsOBid = ps1.uniquePspsOBid
-        JOIN HealpixPixel hp on hp.id = hp_ps1.HealpixPixel_id
-        WHERE 
-            ps1.GoodCandidate = 1 AND
-            hp.id IN (%s) 
-        '''
-    galaxy_result_north = query_db([ps1_galaxy_select % ",".join(northern_pixel_ids)])[0]
-    print("Returned %s galaxies" % len(galaxy_result_north))
-
-    for g in galaxy_result_north:
-        galaxy_id = int(g[0])
-        ra = float(g[1])
-        dec = float(g[2])
-        r = float(g[3])
-        z = float(g[4])
-        prob_Galaxy = float(g[5])
-        pix_id = int(g[6])
-        pix_index = int(g[7])
-
-        # associate this galaxy with the hosting pixel
-        if galaxy_id not in pixel_dict[pix_index].galaxy_ids:
-            pixel_dict[pix_index].galaxy_ids.append(galaxy_id)
-
-        aaomega_galaxy = AAOmega_Galaxy(galaxy_id, ra, dec, prob_Galaxy, z, r, pix_index)
-        if galaxy_id not in galaxy_dict:
-            galaxy_dict[galaxy_id] = aaomega_galaxy
-
-        # if pix_index not in galaxy_dict:
-        #     galaxy_dict[pix_index] = []
-        # galaxy_dict[pix_index].append(aaomega_galaxy)
-
-    for gal_id, galaxy in galaxy_dict.items():
-        pixel = pixel_dict[galaxy.pix_index]
-        prob_fraction = pixel.prob/len(pixel.galaxy_ids)
-        galaxy.prob_fraction = prob_fraction
-
-    class AAOmega_Tile(Tile):
-        def __init__(self, central_ra_deg, central_dec_deg, nside, radius, num_exposures, tile_num):
-            Tile.__init__(self, central_ra_deg, central_dec_deg, width=None, height=None, nside=nside, radius=radius)
-            self.num_exposures = num_exposures
-            self.tile_num = tile_num
-
-        def compute_best_target(self):
-
-            total_prob = 0.0
-            total_num_galxies = 0
-            total_fibers = 370 * self.num_exposures
-
-            contained_pixels = []
-            for pi in self.enclosed_pixel_indices:
-                # some pixels will be outside of our localization...
-                if pi in pixel_dict:
-                    contained_pixels.append(pixel_dict[pi])
-
-            # contained_pixels = [pixel_dict[pi] for pi in self.enclosed_pixel_indices]
-
-            ## TEST
-            # test_n1_pixels = [9001088, 9066655, 9078943, 9066656, 9058477, 9029757,
-            #                           9029758]
-
-
-            # total_fibers = 370 * self.num_exposures
-
-            # N3 TESTS
-            # total_fibers = 22  # no edge case
-            # total_fibers = 23  # missing second exposure
-            # total_fibers = 13  # missing second/third exposure
-            # total_fibers = 14  # missing third exposure
-
-            # N2 TESTS
-            # total_fibers = 14  # no edge case
-            # total_fibers = 15  # missing second exposure
-
-            # total_fibers = 5 * self.num_exposures
-            # 15/10
-
-
-
-            if self.num_exposures == 1:
-                # get N=1 list
-                n1_galaxies = []
-                n1_weights = []
-                for p in contained_pixels:
-                    gals = list(p.get_available_galaxies_by_multiplicity(1))
-                    n1_galaxies += gals
-                    for g in gals:
-                        n1_weights.append(g.compute_weight(1))
-
-                ordered_indices_n1 = (-np.asarray(n1_weights)).argsort()
-                top_galaxies_n1 = list(np.asarray(n1_galaxies)[ordered_indices_n1])
-                top_weights_n1 = list(np.asarray(n1_weights)[ordered_indices_n1])
-
-                # Get final list.
-                ordered_galaxies = OrderedDict()
-                for g in top_galaxies_n1:
-                    if g.galaxy_id not in ordered_galaxies:
-                        ordered_galaxies[g.galaxy_id] = 0
-                    ordered_galaxies[g.galaxy_id] += 1
-
-                # # DEBUG
-                # pprint.pprint(ordered_galaxies)
-
-                final_sample = []
-                final_count = 0
-                for gal_id, multiplicity in ordered_galaxies.items():
-                    if (final_count + multiplicity) <= total_fibers:
-                        final_sample.append((gal_id, multiplicity))
-                        final_count += multiplicity
-                    else:
-                        continue
-
-                for s in final_sample:
-                    total_num_galxies += 1
-
-                    gal_id = s[0]
-                    num_exposures = s[1]
-
-                    g = galaxy_dict[gal_id]
-                    total_prob += g.prob_fraction
-                    g.increment_exps(num_exposures)
-
-
-            elif self.num_exposures == 2:
-
-                # test_n1_pixels = [9001088, 9066655, 9078943, 8927357, 8886405, 8964247]
-                # test_n2_pixels = [9058458, 8931498, 8984738]
-                #
-                # contained_pixels = []
-                # for i in test_n1_pixels:
-                #     contained_pixels.append(pixel_dict[i])
-                # for i in test_n2_pixels:
-                #     contained_pixels.append(pixel_dict[i])
-
-                # get N=1 list
-                n1_galaxies = []
-                n1_weights = []
-                for p in contained_pixels:
-                    gals = list(p.get_available_galaxies_by_multiplicity(1))
-                    n1_galaxies += gals
-                    for g in gals:
-                        n1_weights.append(g.compute_weight(1))
-
-                ordered_indices_n1 = (-np.asarray(n1_weights)).argsort()
-                top_galaxies_n1 = list(np.asarray(n1_galaxies)[ordered_indices_n1])
-                top_weights_n1 = list(np.asarray(n1_weights)[ordered_indices_n1])
-
-                # get entire N=2 list
-                n2_galaxies = []
-                n2_weights = []
-                for p in contained_pixels:
-                    gals = list(p.get_available_galaxies_by_multiplicity(2))
-                    n2_galaxies += gals
-                    for g in gals:
-                        n2_weights.append(g.compute_weight(2))
-
-                ordered_indices_n2 = (-np.asarray(n2_weights)).argsort()
-                top_galaxies_n2 = list(np.asarray(n2_galaxies)[ordered_indices_n2])
-                top_weights_n2 = list(np.asarray(n2_weights)[ordered_indices_n2])
-
-
-                # DEBUG
-                # print(top_weights_n1)
-                # print("\n")
-                # print(top_weights_n2)
-                # print("\n")
-
-
-                for i, n2 in enumerate(top_weights_n2):
-
-                    found = False
-
-                    for j, (w1, w2) in enumerate(zip(top_weights_n1[:-1], top_weights_n1[1:])):
-                        combined_weight = w1 + w2
-
-                        if w1 == 0.0:
-                            continue
-                        elif n2 > combined_weight:
-                            top_weights_n1.insert(j, top_weights_n2[i])
-                            top_weights_n1.insert(j + 1, 0.0) # place holder
-
-                            top_galaxies_n1.insert(j, top_galaxies_n2[i])
-                            top_galaxies_n1.insert(j + 1, top_galaxies_n2[i])
-
-                            found = True
-                            break
-
-                    if not found:
-                        top_galaxies_n1.append(top_galaxies_n2[i])
-                        top_galaxies_n1.append(top_galaxies_n2[i])
-
-                        top_weights_n1.append(top_weights_n2[i])
-                        top_weights_n1.append(0.0)
-
-                # print("\n")
-                # print(top_weights_n1)
-
-                # Get final list.
-                ordered_galaxies = OrderedDict()
-                for g in top_galaxies_n1:
-                    if g.galaxy_id not in ordered_galaxies:
-                        ordered_galaxies[g.galaxy_id] = 0
-                    ordered_galaxies[g.galaxy_id] += 1
-
-                # # DEBUG
-                # pprint.pprint(ordered_galaxies)
-
-                final_sample = []
-                final_count = 0
-                for gal_id, multiplicity in ordered_galaxies.items():
-                    if (final_count + multiplicity) <= total_fibers:
-                        final_sample.append((gal_id, multiplicity))
-                        final_count += multiplicity
-                    else:
-                        continue
-
-                for s in final_sample:
-                    total_num_galxies += 1
-
-                    gal_id = s[0]
-                    num_exposures = s[1]
-
-                    g = galaxy_dict[gal_id]
-                    total_prob += g.prob_fraction
-                    g.increment_exps(num_exposures)
-
-
-                # print(final_sample)
-                # print(final_count)
-                # test = 1
-
-
-            elif self.num_exposures == 3:
-
-                # test_n1_pixels = [9001088, 9066655, 9078943, 9066656, 9058477, 9029757]
-                # test_n2_pixels = [9058458, 8972436, 8927368]
-                # test_n3_pixels = [8607874, 9033873]
-                #
-                # contained_pixels = []
-                # for i in test_n1_pixels:
-                #     contained_pixels.append(pixel_dict[i])
-                # for i in test_n2_pixels:
-                #     contained_pixels.append(pixel_dict[i])
-                # for i in test_n3_pixels:
-                #     contained_pixels.append(pixel_dict[i])
-
-                # get N=1 list x3
-                n1_galaxies = []
-                n1_weights = []
-                for p in contained_pixels:
-                    gals = list(p.get_available_galaxies_by_multiplicity(1))
-                    n1_galaxies += gals
-                    for g in gals:
-                        n1_weights.append(g.compute_weight(1))
-
-                ordered_indices_n1 = (-np.asarray(n1_weights)).argsort()
-                top_galaxies_n1 = list(np.asarray(n1_galaxies)[ordered_indices_n1])
-                top_weights_n1 = list(np.asarray(n1_weights)[ordered_indices_n1])
-
-                # get entire N=2 list -- assuming fewer than 3x370 galaxies in this bin...
-                n2_galaxies = []
-                n2_weights = []
-                for p in contained_pixels:
-                    gals = list(p.get_available_galaxies_by_multiplicity(2))
-                    n2_galaxies += gals
-                    for g in gals:
-                        n2_weights.append(g.compute_weight(2))
-
-                ordered_indices_n2 = (-np.asarray(n2_weights)).argsort()
-                top_galaxies_n2 = list(np.asarray(n2_galaxies)[ordered_indices_n2])
-                top_weights_n2 = list(np.asarray(n2_weights)[ordered_indices_n2])
-
-                # get entire N=3 list -- assuming fewer than 3x370 galaxies in this bin...
-                n3_galaxies = []
-                n3_weights = []
-                for p in contained_pixels:
-                    gals = list(p.get_available_galaxies_by_multiplicity(3))
-                    n3_galaxies += gals
-                    for g in gals:
-                        n3_weights.append(g.compute_weight(3))
-
-                ordered_indices_n3 = (-np.asarray(n3_weights)).argsort()
-                top_galaxies_n3 = list(np.asarray(n3_galaxies)[ordered_indices_n3])
-                top_weights_n3 = list(np.asarray(n3_weights)[ordered_indices_n3])
-
-                # print(top_weights_n1)
-                # print("\n")
-                # print(top_weights_n2)
-                # print("\n")
-                # print(top_weights_n3)
-
-                # bin running_top_galaxies by twos and check if any N=2 galaxy is > any two N=1 galaxies
-                for i, n2 in enumerate(top_weights_n2):
-
-                    found = False
-
-                    for j, (w1, w2) in enumerate(zip(top_weights_n1[:-1], top_weights_n1[1:])):
-                        combined_weight = w1 + w2
-
-                        if w1 == 0.0:
-                            continue
-                        elif n2 > combined_weight:
-                            top_weights_n1.insert(j, top_weights_n2[i])
-                            top_weights_n1.insert(j + 1, 0.0) # place holder
-
-                            top_galaxies_n1.insert(j, top_galaxies_n2[i])
-                            top_galaxies_n1.insert(j + 1, top_galaxies_n2[i])
-
-                            found = True
-                            break
-
-                    if not found:
-                        top_galaxies_n1.append(top_galaxies_n2[i])
-                        top_galaxies_n1.append(top_galaxies_n2[i])
-
-                        top_weights_n1.append(top_weights_n2[i])
-                        top_weights_n1.append(0.0)
-
-                # bin running_top_galaxies by twos and check if any N=2 galaxy is > any two N=1 galaxies
-                for i, n3 in enumerate(top_weights_n3):
-
-                    found = False
-
-                    for j, (w1, w2, w3) in enumerate(zip(top_weights_n1[:-2], top_weights_n1[1:-1], top_weights_n1[2:])):
-                        combined_weight = w1 + w2 + w3
-                        if w1 == 0.0:
-                            # Don't check vs the w2 placeholder
-                            continue
-                        elif n3 > combined_weight:
-
-                            top_weights_n1.insert(j, top_weights_n3[i])
-                            top_weights_n1.insert(j + 1, 0.0) # place holder
-                            top_weights_n1.insert(j + 2, 0.0)  # place holder
-
-                            top_galaxies_n1.insert(j, top_galaxies_n3[i])
-                            top_galaxies_n1.insert(j + 1, top_galaxies_n3[i])
-                            top_galaxies_n1.insert(j + 2, top_galaxies_n3[i])
-
-                            found = True
-                            break
-
-                    if not found:
-                        top_galaxies_n1.append(top_galaxies_n3[i])
-                        top_galaxies_n1.append(top_galaxies_n3[i])
-                        top_galaxies_n1.append(top_galaxies_n3[i])
-
-                        top_weights_n1.append(top_weights_n3[i])
-                        top_weights_n1.append(0.0)
-                        top_weights_n1.append(0.0)
-
-                # print("\n")
-                # print(top_weights_n1)
-
-                # Get final list.
-                ordered_galaxies = OrderedDict()
-                for g in top_galaxies_n1:
-                    if g.galaxy_id not in ordered_galaxies:
-                        ordered_galaxies[g.galaxy_id] = 0
-                    ordered_galaxies[g.galaxy_id] += 1
-
-                # pprint.pprint(ordered_galaxies)
-                final_sample = []
-                final_count = 0
-                for gal_id, multiplicity in ordered_galaxies.items():
-                    if (final_count + multiplicity) <= total_fibers:
-                        final_sample.append((gal_id, multiplicity))
-                        final_count += multiplicity
-                    else:
-                        continue
-
-                for s in final_sample:
-                    total_num_galxies += 1
-
-                    gal_id = s[0]
-                    num_exposures = s[1]
-
-                    g = galaxy_dict[gal_id]
-                    total_prob += g.prob_fraction
-                    g.increment_exps(num_exposures)
-
-                test = 1
-
-
-
-
-
-
-
-
-            else:
-                raise Exception("Too many exposures!")
-
-            return total_num_galxies, total_prob
-
-
-            # Read region file
-    filename = 'test2.reg'
+            id,
+            HealpixMap_id,
+            Pixel_Index,
+            Prob,
+            Distmu,
+            Distsigma,
+            Distnorm,
+            Mean,
+            Stddev,
+            Norm,
+            N128_SkyPixel_id
+        FROM HealpixPixel
+        WHERE id IN (%s)
+    '''
+    southern_95th_pixel_ids = []
+    southern_95th_pixel_ids_file = path_format.format(ps1_strm_dir, "southern_95th_pixel_ids.txt")
+    with open(southern_95th_pixel_ids_file, 'r') as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+        next(csvreader)  # skip header
+        for row in csvreader:
+            id = row[0]
+            southern_95th_pixel_ids.append(id)
+    southern_95th_pixel_result = query_db([southern_95th_pixel_select % ",".join(southern_95th_pixel_ids)])[0]
+    print("Total NSIDE=1024 pixels in Southern 95th: %s" % len(southern_95th_pixel_result))
+    for m in southern_95th_pixel_result:
+        pix_id = int(m[0])
+        index = int(m[2])
+        prob = float(m[3])
+        dist = float(m[7])
+        stddev = float(m[8])
+
+        p = AAOmega_Pixel(index, map_nside, prob, contained_galaxies={}, pixel_id=pix_id, mean_dist=dist,
+                          stddev_dist=stddev)
+        southern_AAOmega_pixel_dict[index] = p
+
+    count_south = len(southern_AAOmega_pixel_dict)
+    print("Count south: %s" % count_south)
+
+    for s_index, s_pix in southern_AAOmega_pixel_dict.items():
+        j = random.randint(0, len(northern_AAOmega_pixel_dict) - 1)
+        n_pix_index = list(northern_AAOmega_pixel_dict.keys())[j]
+        p = northern_AAOmega_pixel_dict[n_pix_index]
+
+        fake_galaxies = {}
+        for g_id, g in p.contained_galaxies.items():
+            fake_g_id = g_id+100000
+            a = AAOmega_Galaxy(fake_g_id, p.coord.ra.degree, p.coord.dec.degree, g.prob_galaxy, g.z, g.kron_r,
+                               s_pix.index, g.required_exps, g.efficiency_func)
+
+            fake_galaxies[fake_g_id] = a
+
+        gal_count = len(fake_galaxies)
+        for gal_id, gal in fake_galaxies.items():
+            gal.prob_fraction = s_pix.prob / gal_count
+        s_pix.contained_galaxies = fake_galaxies
+
+    northern_AAOmega_pixel_dict.update(southern_AAOmega_pixel_dict)
+
+
+
+    # endregion
+
+    # get AAOmega Static grid to do galaxy demographics
+    # select_aaomega_static_grid = '''
+    #     SELECT
+    #         st.RA, st._Dec, d.Deg_radius
+    #     FROM StaticTile st
+    #     JOIN Detector d on d.id = st.Detector_id
+    #     WHERE d.id = 8
+    # '''
+    # static_grid_result = query_db([select_aaomega_static_grid])[0]
+    # static_grid_tiles = []
+    # for sg in static_grid_result:
+    #     ra = float(sg[0])
+    #     dec = float(sg[1])
+    #     radius = float(sg[2])
+    #
+    #     static_grid_tiles.append(AAOmega_Tile(ra, dec, map_nside, radius,
+    #                                       northern_AAOmega_pixel_dict, num_exposures=1, tile_num=1))
+
+
+
+
+
+
+
+    # Load observation plan from region file and create AAOmega tiles
+    # filename = 'test2.reg'
+    filename = 'Obs10.reg'
     filepath = path_format.format(ps1_strm_dir, filename)
+    localization_poly = [] # used to hold polygons from regions
+
 
     aaomega_detector = Detector("2dF", detector_width_deg=None, detector_height_deg=None, detector_radius_deg=1.05)
     aaomega_tiles = []
@@ -1717,19 +1484,39 @@ if read_region_poly:
                 tokens = l.replace("circle(", "").replace("\") # color=red text={%s}\n" % tup_str, "").split(",")
                 ra = tokens[0].strip()
                 dec = tokens[1].strip()
+
+
+
                 c = coord.SkyCoord(ra, dec, unit=(u.hour, u.deg))
+
+
+
                 radius_deg = float(tokens[2])/3600. # input in arcseconds
 
-                aaomega_tiles.append(AAOmega_Tile(c.ra.degree, c.dec.degree, map_nside, radius_deg, num_exposures=exp_num,
-                                                  tile_num=tile_num))
-                # aaomega_tiles.append(AAOmega_Tile(c.ra.degree, c.dec.degree, map_nside, radius_deg, num_exposures=3))
-                # # aaomega_tiles.append(AAOmega_Tile(c.ra.degree, c.dec.degree, map_nside, radius_deg, num_exposures=2))
-                # break
+                a = AAOmega_Tile(c.ra.degree, c.dec.degree, map_nside, radius_deg,
+                                                  northern_AAOmega_pixel_dict, num_exposures=exp_num,
+                                                  tile_num=tile_num)
+
+                if len(a.contained_pixels_dict) > 0:
+
+                    print("RA Hour: %s; Dec Deg: %s" % (c.ra.hms[0], c.dec.dms[0]))
+
+                    aaomega_tiles.append(a)
+
             elif "polygon" in l:
+
+                l_str = l
+                if "color=cyan" in l:
+                    l_str = l_str.replace(" # color=cyan\n", "")
+                elif "color=red" in l:
+                    l_str = l_str.replace(" # color=red\n", "")
+                else:
+                    continue
+
                 poly_vertices = []
 
                 # EX: polygon(1:28:03.984,-33:49:25.649, ... 1:28:14.531,-33:46:44.047)
-                tokens = l.replace("polygon(", "").replace(")\n", "").split(",")
+                tokens = l_str.replace("polygon(", "").replace(")", "").split(",")
 
                 i = 0
                 while i < len(tokens):
@@ -1742,43 +1529,208 @@ if read_region_poly:
                 localization_poly.append(SQL_Polygon([geometry.Polygon(poly_vertices)], aaomega_detector))
 
 
+    # DEBUG
+    # For Ryan, serialize the per tile galaxy information for the sample.
+    # for i, t in enumerate(aaomega_tiles):
+    #
+    #     flattened_galaxies = []
+    #
+    #     for pix_index, pix in t.contained_pixels_dict.items():
+    #         for gal_id, gal in pix.contained_galaxies.items():
+    #             flattened_galaxies.append((gal.galaxy_id, gal.z, gal.z_photErr))
+    #
+    #     if len(flattened_galaxies) > 0:
+    #         with open("../PS1_DR2_QueryData/AAOmegaTiles/tile_%s.txt" % i, 'w') as csvfile:
+    #             csvwriter = csv.writer(csvfile, delimiter=',')
+    #             csvwriter.writerow(("galaxy_id", "phot_z", "phot_z_err"))
+    #
+    #             for f in flattened_galaxies:
+    #                 csvwriter.writerow(f)
+
+    # raise Exception("Stop")
+
+
+
     total_exps = 0
     total_slews = 0
     sortedTiles = sorted(aaomega_tiles, key=lambda x: x.tile_num)
     all_gals, all_prob = 0, 0
+    all_gal_ids = []
+    print("Tile Num\tNum Exp\t\tGalaxies\tNet Prob")
     for t in sortedTiles:
+
         total_slews += 1
         total_exps += t.num_exposures
 
-        gals, prob = t.compute_best_target()
+        gals, prob, gal_ids = t.calculate_efficiency()
+
+        all_gal_ids += gal_ids
         all_gals += gals
         all_prob += prob
-        print("Tile #%s (%s exps): %s; %s" % (t.tile_num, t.num_exposures, gals, prob))
+        print("%s\t\t\t%s\t\t\t%s\t\t\t%0.6f" % (t.tile_num, t.num_exposures, gals, prob))
+        # print("%s\t\t\t%s\t\t\t%s\t\t\t%0.8f" % (t.tile_num, t.num_exposures, gals, prob))
+
+    print("****************\n")
+    print("Total Galaxies %s/%s" % (all_gals,
+                                    np.sum([len(p.contained_galaxies)
+                                            for pi, p in northern_AAOmega_pixel_dict.items()])))
+    print("Total Prob: %0.2f" % all_prob)
+    total_hours = (total_exps * 40 + total_slews * 15) / 60.
+    total_nights = total_hours / 10.0
+    print("Total Hours: %0.2f; Total 11-hour nights: %0.2f" % (total_hours, total_nights))
+
 
     print("\n")
-    print(all_gals, all_prob)
-    total_hours = (total_exps*40 + total_slews*15)/60.
-    total_nights = total_hours/11.0
-    print("Total hours: %0.2f; total 11 hour nights: %0.2f" % (total_hours, total_nights))
+    print("\n")
+    print("\n")
 
-
-    # gals1, prob1 = aaomega_tiles[0].compute_best_target()
+    # #### Figuring out the percentage of the full sample that we think we can get by percentile membership
+    # h = 0.7
+    # phi = 1.6e-2 * h ** 3  # +/- 0.3 Mpc^-3
+    # a = -1.07  # +/- 0.07
+    # L_B_star = 1.2e+10 / h ** 2  # +/- 0.1
     #
-    # gals2, prob2 = aaomega_tiles[1].compute_best_target()
-    # print(gals2, prob2)
-    # #
-    # print(gals1+gals2, prob1+prob2)
-    # print("\n\n\n\n")
-    print("\n")
-    print("\n")
-    print("\n")
-    print("\n")
-    print("\n")
-    print("\n")
-    raise Exception("Strop")
-
-
-
+    # _95_denominator_gals = [g for g_id, g in northern_95th_AAOmega_galaxy_dict_by_galaxy_id.items()]
+    # _50_denominator_gals = []
+    # for g in _95_denominator_gals:
+    #     if g.pix_index in _50_AAOmega_pixel_dict:
+    #         _50_denominator_gals.append(g)
+    #
+    #
+    # _95_numerator_gals = []
+    # _50_numerator_gals = []
+    #
+    # for gi in all_gal_ids:
+    #     gal = northern_95th_AAOmega_galaxy_dict_by_galaxy_id[gi]
+    #
+    #     if gal.pix_index in _50_AAOmega_pixel_dict:
+    #         _50_numerator_gals.append(gal)
+    #
+    #     if gal.pix_index in northern_95th_AAOmega_galaxy_dict_by_pixel_index:
+    #         _95_numerator_gals.append(gal)
+    #
+    # _95th_denominator_luminosities = []
+    # for g in _95_denominator_gals:
+    #     synth_B2 = g.synth_B
+    #     z_dist = cosmo.luminosity_distance(g.z).value
+    #
+    #     L_Sun__L_star = 10 ** (-0.4 * ((synth_B2 - (5 * np.log10(z_dist * 1e+6) - 5)) - 5.48)) / L_B_star
+    #     _95th_denominator_luminosities.append(L_Sun__L_star)
+    #
+    # _50th_denominator_luminosities = []
+    # for g in _50_denominator_gals:
+    #     synth_B2 = g.synth_B
+    #     z_dist = cosmo.luminosity_distance(g.z).value
+    #
+    #     L_Sun__L_star = 10 ** (-0.4 * ((synth_B2 - (5 * np.log10(z_dist * 1e+6) - 5)) - 5.48)) / L_B_star
+    #     _50th_denominator_luminosities.append(L_Sun__L_star)
+    #
+    #
+    # _95th_numerator_luminosities = []
+    # for g in _95_numerator_gals:
+    #     synth_B2 = g.synth_B
+    #     z_dist = cosmo.luminosity_distance(g.z).value
+    #
+    #     L_Sun__L_star = 10 ** (-0.4 * ((synth_B2 - (5 * np.log10(z_dist * 1e+6) - 5)) - 5.48)) / L_B_star
+    #     _95th_numerator_luminosities.append(L_Sun__L_star)
+    #
+    # _50th_numerator_luminosities = []
+    # for g in _50_numerator_gals:
+    #     synth_B2 = g.synth_B
+    #     z_dist = cosmo.luminosity_distance(g.z).value
+    #
+    #     L_Sun__L_star = 10 ** (-0.4 * ((synth_B2 - (5 * np.log10(z_dist * 1e+6) - 5)) - 5.48)) / L_B_star
+    #     _50th_numerator_luminosities.append(L_Sun__L_star)
+    #
+    # y_95_denominator, binEdges_95_denominator = np.histogram(np.log10(_95th_denominator_luminosities), bins=np.linspace(-6.0, 2.0, 45))
+    # bincenters_95_denominator = 0.5 * (binEdges_95_denominator[1:] + binEdges_95_denominator[:-1])
+    #
+    # y_50_denominator, binEdges_50_denominator = np.histogram(np.log10(_50th_denominator_luminosities), bins=np.linspace(-6.0, 2.0, 45))
+    # bincenters_50_denominator = 0.5 * (binEdges_50_denominator[1:] + binEdges_50_denominator[:-1])
+    #
+    # y_95_numerator, binEdges_95_numerator = np.histogram(np.log10(_95th_numerator_luminosities), bins=np.linspace(-6.0, 2.0, 45))
+    # bincenters_95_numerator = 0.5 * (binEdges_95_numerator[1:] + binEdges_95_numerator[:-1])
+    #
+    # y_50_numerator, binEdges_50_numerator = np.histogram(np.log10(_50th_numerator_luminosities), bins=np.linspace(-6.0, 2.0, 45))
+    # bincenters_50_numerator = 0.5 * (binEdges_50_numerator[1:] + binEdges_50_numerator[:-1])
+    #
+    # _95_comp_bins = []
+    # _50_comp_bins = []
+    # _95_comp_ratios = []
+    # _50_comp_ratios = []
+    #
+    # log_LB_LStar_efficiency_thresh = -1.3439626432899594
+    # for i, bs in enumerate(bincenters_95_denominator):
+    #     _95_denominator_interval = y_95_denominator[i]
+    #     _50_denominator_interval = y_50_denominator[i]
+    #     _95_numerator_interval = y_95_numerator[i]
+    #     _50_numerator_interval = y_50_numerator[i]
+    #
+    #     _95_comp_ratio = 0
+    #     if _95_denominator_interval > 0 and _95_numerator_interval > 0:
+    #         if bs < log_LB_LStar_efficiency_thresh:
+    #             _95_comp_ratio = (0.7*_95_numerator_interval) / _95_denominator_interval
+    #         else:
+    #             _95_comp_ratio = _95_numerator_interval / _95_denominator_interval
+    #
+    #     _50_comp_ratio = 0
+    #     if _50_denominator_interval > 0 and _50_numerator_interval > 0:
+    #         if bs < log_LB_LStar_efficiency_thresh:
+    #             _50_comp_ratio = (0.7*_50_numerator_interval) / _50_denominator_interval
+    #         else:
+    #             _50_comp_ratio = _50_numerator_interval / _50_denominator_interval
+    #
+    #
+    #     if _95_denominator_interval > 0 and bs > -5:
+    #         _95_comp_bins.append(bs)
+    #         _95_comp_ratios.append(_95_comp_ratio)
+    #     elif _95_denominator_interval == 0 and bs <= -5:
+    #         _95_comp_bins.append(bs)
+    #         _95_comp_ratios.append(_95_comp_ratio)
+    #
+    #     if _50_denominator_interval > 0 and bs > -4:
+    #         _50_comp_bins.append(bs)
+    #         _50_comp_ratios.append(_50_comp_ratio)
+    #     elif _50_denominator_interval == 0 and bs <= -4:
+    #         _50_comp_bins.append(bs)
+    #         _50_comp_ratios.append(_50_comp_ratio)
+    #
+    # from scipy.signal import savgol_filter
+    #
+    # x1 = np.linspace(np.min(_50_comp_bins), np.max(_50_comp_bins), 100)
+    # itp1 = interp1d(_50_comp_bins, _50_comp_ratios, kind='linear')
+    # window_size1, poly_order1 = 5, 3
+    # # window_size, poly_order = 3, 2
+    # yy_sg1 = savgol_filter(itp1(x1), window_size1, poly_order1)
+    #
+    # x2 = np.linspace(np.min(_95_comp_bins), np.max(_95_comp_bins), 100)
+    # itp2 = interp1d(_95_comp_bins, _95_comp_ratios, kind='linear')
+    # # window_size2, poly_order2 = 7, 5
+    # window_size2, poly_order2 = 7, 3
+    # # window_size2, poly_order2 = 21, 3
+    #
+    # yy_sg2 = savgol_filter(itp2(x2), window_size2, poly_order2)
+    #
+    #
+    # fig = plt.figure(figsize=(10, 10), dpi=800)
+    # ax = fig.add_subplot(111)
+    #
+    # # ax.plot(_95_comp_bins, _95_comp_ratios, '+', color='red')
+    # # ax.plot(_50_comp_bins, _50_comp_ratios, '+', color='red')
+    # ax.plot(x1, yy_sg1, '-', color='orange')
+    #
+    # ax.plot(x2, yy_sg2, '-', color='green')
+    #
+    # ax.set_xlim([-6.0, 2.0])
+    # ax.set_xticks([-6, -5, -4, -3, -2, -1, 0, 1])
+    # ax.set_xlabel(r"Log($L_B/L^{*}_{B}$)", fontsize=24)
+    # # ax.set_ylabel(r"Log($N$)", fontsize=24)
+    # ax.tick_params(axis='both', which='major', labelsize=24, length=8.0, width=2)
+    # fig.savefig("PS1_GW190814_Imaged_vs_Total.png", bbox_inches='tight')
+    # plt.close('all')
+    #
+    #
+    # raise Exception("Stop")
 
 
 
@@ -1795,14 +1747,72 @@ if read_region_poly:
                 llcrnrlon=8.0,
                 urcrnrlon=25.0)
 
-    for pix_index, p in pixel_dict.items():
-        p.plot(m, ax, edgecolor="black", facecolor="None", linewidth="0.5", alpha=0.15)
+
+    # gal_weighted_prob = []
+    # for pix_index, p in northern_AAOmega_pixel_dict.items():
+    #     net_prob = 0.0
+    #     for gi, g in p.contained_galaxies.items():
+    #         net_prob += g.prob_fraction
+    #     gal_weighted_prob.append(net_prob)
+    all_prob = []
+    for pix_index, p in northern_AAOmega_pixel_dict.items():
+        all_prob.append(p.prob)
+
+    min_gal_weighted_prob = np.min(all_prob)
+    max_gal_weighted_prob = np.max(all_prob)
+    n = colors.Normalize(min_gal_weighted_prob, max_gal_weighted_prob)
+
+    # max_galaxies_per_pix = -999
+    # min_galaxies_per_pix = 999
+    # max_galaxies_per_pix = 30
+    # min_galaxies_per_pix = 0
+    # for pix_index, p in northern_AAOmega_pixel_dict.items():
+    #     count = len(p.contained_galaxies)
+    #     if count < min_galaxies_per_pix:
+    #         min_galaxies_per_pix = count
+    #     if count > max_galaxies_per_pix:
+    #         max_galaxies_per_pix = count
+    # n = colors.Normalize(min_galaxies_per_pix, max_galaxies_per_pix)
+    # print(min_galaxies_per_pix, max_galaxies_per_pix)
+
+    for pix_index, p in northern_AAOmega_pixel_dict.items():
+        # count = len(p.contained_galaxies)
+        # clr = plt.cm.Greys(n(10))
+        # if count == 0:
+        #     clr = plt.cm.Greys(n(0))
+        # elif count > 0 and count < 10:
+        #     clr = plt.cm.Greys(n(5))
+        # elif count >= 10 and count < 20:
+        #     clr = plt.cm.Greys(n(15))
+        # elif count >= 20 and count < 30:
+        #     clr = plt.cm.Greys(n(25))
+        # elif count >= 30:
+        #     clr = plt.cm.Greys(n(30))
+
+
+
+        clr = plt.cm.Greys(n(p.prob))
+        p.plot(m, ax, edgecolor="None", facecolor=clr, linewidth="1.0", alpha=1.0)
 
     for l in localization_poly:
-        l.plot(m, ax, edgecolor='green', linewidth=1.5, facecolor='None')
+        l.plot(m, ax, edgecolor='black', linewidth=1.5, facecolor='None')
 
     for t in aaomega_tiles:
-        t.plot(m, ax, edgecolor="red", facecolor="None", linewidth="1.0")
+        # clr = "green"
+        # if t.num_exposures == 2:
+        #     clr = "blue"
+        # elif t.num_exposures == 3:
+        #     clr = "red"
+
+        if t.num_exposures == 3:
+            t.plot(m, ax, edgecolor="red", facecolor="None", linewidth="2.0")
+
+    for t in aaomega_tiles:
+
+        if t.num_exposures == 2:
+            t.plot(m, ax, edgecolor="blue", facecolor="None", linewidth="2.0")
+
+
 
 
 
@@ -1860,6 +1870,29 @@ if read_region_poly:
                 text_obj.set_text(RA_label_dict[tick_obj])
                 text_obj.set_size(sm_label_size)
 
+
+    sm = plt.cm.ScalarMappable(norm=n, cmap=plt.cm.Greys)
+    sm.set_array([])  # can be an empty list
+
+    tks = np.linspace(min_gal_weighted_prob, max_gal_weighted_prob, 5)
+    # tks = np.logspace(np.log10(min_prob), np.log10(max_prob), 11)
+    tks_strings = []
+
+    for t in tks:
+        tks_strings.append('%0.2f' % (t * 100))
+
+    cb = fig.colorbar(sm, ax=ax, ticks=tks, orientation='vertical', fraction=0.04875, pad=0.02,
+                      alpha=0.80)  # 0.08951
+    cb.ax.set_yticklabels(tks_strings, fontsize=16)
+    cb.set_label("2D Pixel Probability", fontsize=label_size, labelpad=9.0)
+
+    cb.ax.tick_params(width=2.0, length=6.0)
+
+    cb.outline.set_linewidth(2.0)
+
+
+
+
     for axis in ['top', 'bottom', 'left', 'right']:
         ax.spines[axis].set_linewidth(2.0)
 
@@ -1872,6 +1905,1122 @@ if read_region_poly:
     fig.savefig('GW190814_PS1_region_test.png', bbox_inches='tight')  # ,dpi=840
     plt.close('all')
     print("... Done.")
+
+if h0_calc_test_single:
+
+    start = time.time()
+
+    northern_95th_pixel_ids = []
+    northern_95th_pixel_ids_file = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
+    with open(northern_95th_pixel_ids_file, 'r') as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+        next(csvreader)  # skip header
+        for row in csvreader:
+            id = row[0]
+            northern_95th_pixel_ids.append(id)
+
+    H0 = 70 # km/s/Mpc
+    c = 2.998e+5 # km/s
+
+    D0 = 267
+    D0_err = 52
+    D0_dist = norm(loc=D0, scale=D0_err)
+
+    # z bounds given D0 and H0
+    z_min = (H0 * (D0 - D0_err))/c
+    z_max = (H0 * (D0 + D0_err))/c
+    print("\nz bounds [%s, %s]\n" % (z_min, z_max))
+
+    get_from_db = False
+    match_galaxies = []
+    if get_from_db:
+        id_str = ",".join([str(i) for i in northern_95th_pixel_ids])
+        select_galaxies_in_volume = '''
+        SELECT 
+            g.id as gd2_id, 
+            g.RA, 
+            g._Dec, 
+            g.z,
+            g.z_dist,
+            g.B,
+            p.ps1_galaxy_id,
+            p.gaia_ra,
+            p.gaia_dec,
+            p.synth_B1,
+            p.synth_B2,
+            p.z_phot0,
+            p.z_photErr,
+            p.N128_SkyPixel_id as ps1_N128_SkyPixel_id,
+            AngSep(g.RA, g._Dec, p.gaia_ra, p.gaia_dec) AS sep
+        FROM 
+            (SELECT 
+                gd2.id,
+                gd2.RA,
+                gd2._Dec,
+                gd2.z,
+                gd2.z_dist,
+                gd2.B
+            FROM 
+                GalaxyDistance2 gd2
+            JOIN 
+                HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id
+            JOIN 
+                HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id
+            WHERE 
+                hp.HealpixMap_id = 2 AND
+                gd2.flag2 IN (1,3) AND 
+                hp.id IN (%s)) AS g
+        JOIN 
+            (SELECT 
+                ps1.id as ps1_galaxy_id,
+                ps1.gaia_ra,
+                ps1.gaia_dec,
+                ps1.synth_B1,
+                ps1.synth_B2,
+                ps.z_phot0,
+                ps.z_photErr,
+                ps1.N128_SkyPixel_id
+            FROM 
+                PS1_Galaxy ps1 
+            JOIN 
+                PS1_STRM ps on ps.uniquePspsOBid = ps1.uniquePspsOBid
+            JOIN 
+                HealpixPixel_PS1_Galaxy hp_ps1 on hp_ps1.PS1_Galaxy_id = ps1.id
+            JOIN 
+                HealpixPixel hp on hp.id = hp_ps1.HealpixPixel_id
+            WHERE 
+                hp.HealpixMap_id = 2 AND
+                ps.z_phot0 <> -999 AND
+                hp.id IN (%s)) AS p 
+        ON AngSep(g.RA, g._Dec, p.gaia_ra, p.gaia_dec)*3600 <= 1.0
+        WHERE g.z BETWEEN %s AND %s 
+    '''
+
+        galaxy_result = query_db([select_galaxies_in_volume % (id_str, id_str, z_min, z_max)])[0]
+
+        with open(path_format.format(ps1_strm_dir, "GLADE_matched_with_PS1_Northern_95th.txt"), 'w') as csvfile:
+            csvwriter = csv.writer(csvfile, delimiter=',')
+            csvwriter.writerow(("gd2_id", "glade_ra", "glade_dec", "z", "z_dist", "B", "ps1_galaxy_id", "gaia_ra",
+                                "gaia_dec", "synth_B1", "synth_B2", "z_phot0", "z_photErr", "N128_SkyPixel_id", "sep"))
+            for g in galaxy_result:
+                gd2_id = int(g[0])
+                glade_ra = float(g[1])
+                glade_dec = float(g[2])
+                z = float(g[3])
+                z_dist = float(g[4])
+                B = float(g[5])
+                ps1_galaxy_id = int(g[6])
+                gaia_ra = float(g[7])
+                gaia_dec = float(g[8])
+                synth_B1 = float(g[9])
+                synth_B2 = float(g[10])
+                z_phot0 = float(g[11])
+                z_photErr = float(g[12])
+                N128_SkyPixel_id = int(g[13])
+                sep = float(g[14])
+
+                match_galaxies.append((gd2_id, glade_ra, glade_dec, z, z_dist, B, ps1_galaxy_id, gaia_ra, gaia_dec,
+                                       synth_B1, synth_B2, z_phot0, z_photErr, N128_SkyPixel_id, sep))
+                csvwriter.writerow(g)
+    else:
+        with open(path_format.format(ps1_strm_dir, "GLADE_matched_with_PS1_Northern_95th.txt"), 'r') as csvfile:
+            csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+            next(csvreader)  # skip header
+
+            for g in csvreader:
+                gd2_id = int(g[0])
+                glade_ra = float(g[1])
+                glade_dec = float(g[2])
+                z = float(g[3])
+                z_dist = float(g[4])
+                B = float(g[5])
+                ps1_galaxy_id = int(g[6])
+                gaia_ra = float(g[7])
+                gaia_dec = float(g[8])
+                synth_B1 = float(g[9])
+                synth_B2 = float(g[10])
+                z_phot0 = float(g[11])
+                z_photErr = float(g[12])
+                N128_SkyPixel_id = int(g[13])
+                sep = float(g[14])
+
+                match_galaxies.append((gd2_id, glade_ra, glade_dec, z, z_dist, B, ps1_galaxy_id, gaia_ra, gaia_dec,
+                                       synth_B1, synth_B2, z_phot0, z_photErr, N128_SkyPixel_id, sep))
+
+    print("\nMatched sample contains %s galaxies..." % len(match_galaxies))
+
+    # Model the distribution for the redshifts in the galaxy sample.
+    # Sample this distribution for the "true z" of this simulated event
+    # z_values = [g[11] for g in match_galaxies] # g[11] = PS1 phot z
+    z_values = [g[3] for g in match_galaxies]  # g[3] = GLADE phot z
+    # Gaussian Kernel Density Estimateion
+    z_kde = gaussian_kde(z_values)
+    model_z = np.linspace(0, 0.13, 101)
+    model_z_pdf = z_kde.evaluate(model_z)
+
+    true_z = z_kde.resample(1)[0][0]
+    true_D = c * true_z / H0  # convert to True distance via H0...
+    print("Sampled z: %s" % true_z)
+    print("True D given H0=%s and z=%s: %s Mpc" % (H0, true_z, true_D))
+
+
+    # Create a distance distribution for this true D
+    measured_D = true_D + (1 if random.random() < 0.5 else -1) * true_D * random.uniform(0.0, 0.333)  # add some noise
+    measured_D_err = measured_D * 0.3
+    measured_D_dist = norm(loc=measured_D, scale=measured_D_err)
+    print("Measured Distance, Err: %s +/- %s Mpc" % (measured_D, measured_D_err))
+
+
+
+    # Get galaxy H0
+    glade_z = match_galaxies[0][3]
+    spec_z_err = 1.5e-4 # this is a guess for GLADE galaxies
+    H0_i_spec = (c * glade_z)/measured_D
+    H0_i_err_spec = np.sqrt(spec_z_err**2*(c/measured_D)**2 + measured_D_err**2*(-(c*glade_z)/measured_D**2)**2)
+    H_spec = norm(loc=H0_i_spec, scale=H0_i_err_spec)
+
+    print("Spec-z h0: %0.4f" % H0_i_spec)
+    print("Spec-z err: %0.4f" % H0_i_err_spec)
+
+
+    ps1_z = match_galaxies[0][11]
+    # phot_z_err = match_galaxies[0][12]
+    phot_z_err = 0.03
+    H0_i_phot = (c * ps1_z) / measured_D
+    H0_i_err_phot = np.sqrt(phot_z_err**2*(c/measured_D)**2 + measured_D_err**2*(-(c*ps1_z)/measured_D**2)**2)
+    H_phot = norm(loc=H0_i_phot, scale=H0_i_err_phot)
+
+    print("Phot-z h0: %0.4f" % H0_i_phot)
+    print("Phot-z err: %0.4f" % H0_i_err_phot)
+
+
+    fig = plt.figure(figsize=(18, 18), dpi=800)
+    ax1 = fig.add_subplot(221)
+
+    n1, bins1, patches1 = ax1.hist(z_values, histtype='step', bins=np.linspace(0, 0.13, 20), color="red",
+                                   density=True, label="GLADE spec z\nNorthern 95th\nH0=70, z=[%0.4f, %0.4f]" %
+                                                       (z_min, z_max))
+    ax1.axvline(true_z, 0, 1, color='b', linestyle=":", label="true_z/D=%0.4f/%0.0f" % (true_z, true_D))
+    ax1.plot(model_z, model_z_pdf, 'k--', label="KDE")
+    ax1.set_xlabel("Photo z")
+    ax1.set_ylabel("PDF")
+    ax1.legend(loc="upper right", labelspacing=1.5)
+
+
+    ax2 = fig.add_subplot(222)
+    D0_dist_input = np.linspace(D0 - 3*D0_err, D0 + 3*D0_err, 100)
+    D_dist_input = np.linspace(measured_D - 3 * measured_D_err, measured_D + 3 * measured_D_err, 100)
+    ax2.plot(D0_dist_input, D0_dist.pdf(D0_dist_input), color='r', label="0814\nD=%0.0f+/-%0.0f" % (D0, D0_err))
+
+    ax2.axvline(measured_D, 0, 1, color='b', linestyle=":", label="0814 sampled D=%0.0f Mpc" % measured_D)
+    ax2.plot(D_dist_input, measured_D_dist.pdf(D_dist_input), color='k', linestyle='--',
+             label="Resampled\nD=%0.0f+/-%0.0f" % (measured_D, measured_D_err))
+
+    ax2.set_xlabel(r"$\mathrm{D_L}$ [Mpc]")
+    ax2.set_ylabel("PDF")
+    ax2.set_ylim(ymin=0)
+    ax2.legend(loc="upper right", labelspacing=1.5)
+
+
+    ax3 = fig.add_subplot(223)
+    H0_input = np.linspace(H0_i_spec - 5*H0_i_err_phot, H0_i_spec + 5*H0_i_err_phot, 100)
+    ax3.plot(H0_input, H_spec.pdf(H0_input), color='r', label="Spec H0\nGal spec z=%0.4f+/-%0.4f" %
+                                                              (glade_z, spec_z_err))
+    fractional_spec_err = (H0_i_err_spec/H0_i_spec)*100
+    fractional_phot_err = (H0_i_err_phot/H0_i_phot)*100
+
+    ax3.axvline(H0_i_spec, 0, 1, color='r', linestyle=":", label="H0_spec=%0.2f +/- %0.0f%%" %
+                                                                 (H0_i_spec, fractional_spec_err))
+    ax3.plot(H0_input, H_phot.pdf(H0_input), color='k', linestyle='--', label="Phot H0\nGal phot z=%0.4f+/-%0.4f" %
+                                                                              (ps1_z, phot_z_err))
+    ax3.axvline(H0_i_phot, 0, 1, color='k', linestyle=":", label="H0_phot=%0.2f +/- %0.0f%%" %
+                                                                 (H0_i_phot, fractional_phot_err))
+    ax3.set_xlabel(r"$\mathrm{H_0}$ [km s$^-1$ Mpc$^-1$]")
+    ax3.set_ylabel("PDF")
+    ax3.set_ylim(ymin=0)
+    ax3.set_xlim([20, 140])
+    ax3.legend(loc="upper right", labelspacing=1.5)
+
+
+    fig.savefig("H0_single_test.png", bbox_inches='tight')
+    plt.close('all')
+
+    end = time.time()
+    duration = (end - start)
+    print("\n********* start DEBUG ***********")
+    print("Execution time: %s" % duration)
+    print("********* end DEBUG ***********\n")
+
+if h0_calc_test_sample:
+
+    start = time.time()
+
+    # Global variables
+    H0 = 70  # km/s/Mpc
+    c = 2.998e+5  # km/s
+    D0 = 267.
+    D0_err = 52.
+    # D0_frac_err = D0_err/D0
+    D0_dist = norm(loc=D0, scale=D0_err)
+    print("Original Distance, Err: %s +/- %s Mpc" % (D0, D0_err))
+
+    # z bounds given D0 and H0
+    z_min = (H0 * (D0 - D0_err)) / c
+    z_max = (H0 * (D0 + D0_err)) / c
+    print("\nz bounds [%s, %s]\n" % (z_min, z_max))
+
+
+    # Get localization pixels
+    northern_95th_pixel_ids = []
+    northern_95th_pixel_ids_file = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
+    with open(northern_95th_pixel_ids_file, 'r') as csvfile:
+        csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+        next(csvreader)  # skip header
+        for row in csvreader:
+            id = row[0]
+            northern_95th_pixel_ids.append(id)
+
+
+    # Get galaxies in localization
+    get_from_db = False
+    match_galaxies = []
+    if get_from_db:
+        id_str = ",".join([str(i) for i in northern_95th_pixel_ids])
+    #     select_galaxies_in_volume = '''
+    #     SELECT
+    #         g.id as gd2_id,
+    #         g.RA,
+    #         g._Dec,
+    #         g.z,
+    #         g.z_dist,
+    #         g.B,
+    #         p.ps1_galaxy_id,
+    #         p.gaia_ra,
+    #         p.gaia_dec,
+    #         p.synth_B1,
+    #         p.synth_B2,
+    #         p.z_phot0,
+    #         p.z_photErr,
+    #         p.N128_SkyPixel_id as ps1_N128_SkyPixel_id,
+    #         AngSep(g.RA, g._Dec, p.gaia_ra, p.gaia_dec) AS sep
+    #     FROM
+    #         (SELECT
+    #             gd2.id,
+    #             gd2.RA,
+    #             gd2._Dec,
+    #             gd2.z,
+    #             gd2.z_dist,
+    #             gd2.B
+    #         FROM
+    #             GalaxyDistance2 gd2
+    #         JOIN
+    #             HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id
+    #         JOIN
+    #             HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id
+    #         WHERE
+    #             hp.HealpixMap_id = 2 AND
+    #             gd2.flag2 IN (1,3) AND
+    #             hp.id IN (%s)) AS g
+    #     JOIN
+    #         (SELECT
+    #             ps1.id as ps1_galaxy_id,
+    #             ps1.gaia_ra,
+    #             ps1.gaia_dec,
+    #             ps1.synth_B1,
+    #             ps1.synth_B2,
+    #             ps.z_phot0,
+    #             ps.z_photErr,
+    #             ps1.N128_SkyPixel_id
+    #         FROM
+    #             PS1_Galaxy ps1
+    #         JOIN
+    #             PS1_STRM ps on ps.uniquePspsOBid = ps1.uniquePspsOBid
+    #         JOIN
+    #             HealpixPixel_PS1_Galaxy hp_ps1 on hp_ps1.PS1_Galaxy_id = ps1.id
+    #         JOIN
+    #             HealpixPixel hp on hp.id = hp_ps1.HealpixPixel_id
+    #         WHERE
+    #             hp.HealpixMap_id = 2 AND
+    #             ps.z_phot0 <> -999 AND
+    #             hp.id IN (%s)) AS p
+    #     ON AngSep(g.RA, g._Dec, p.gaia_ra, p.gaia_dec)*3600 <= 1.0
+    #     WHERE g.z BETWEEN %s AND %s
+    # '''
+
+        select_galaxies_in_volume = '''
+            SELECT 
+                gd2.id, 
+                gd2.RA, 
+                gd2._Dec, 
+                gd2.z, 
+                gd2.z_dist, 
+                gd2.B 
+            FROM 
+                GalaxyDistance2 gd2 
+            JOIN 
+                HealpixPixel_GalaxyDistance2 hp_gd2 on hp_gd2.GalaxyDistance2_id = gd2.id 
+            JOIN 
+                HealpixPixel hp on hp.id = hp_gd2.HealpixPixel_id 
+            WHERE 
+                hp.HealpixMap_id = 2 AND 
+                hp.id IN (%s) AND 
+                gd2.z BETWEEN %s AND %s  
+            '''
+
+        # galaxy_result = query_db([select_galaxies_in_volume % (id_str, id_str, z_min, z_max)])[0]
+        galaxy_result = query_db([select_galaxies_in_volume % (id_str, z_min, z_max)])[0]
+
+        # with open(path_format.format(ps1_strm_dir, "GLADE_matched_with_PS1_Northern_95th.txt"), 'w') as csvfile:
+        #     csvwriter = csv.writer(csvfile, delimiter=',')
+        #     csvwriter.writerow(("gd2_id", "glade_ra", "glade_dec", "z", "z_dist", "B", "ps1_galaxy_id", "gaia_ra",
+        #                         "gaia_dec", "synth_B1", "synth_B2", "z_phot0", "z_photErr", "N128_SkyPixel_id", "sep"))
+        #     for g in galaxy_result:
+        #         gd2_id = int(g[0])
+        #         glade_ra = float(g[1])
+        #         glade_dec = float(g[2])
+        #         z = float(g[3])
+        #         z_dist = float(g[4])
+        #         B = float(g[5])
+        #         ps1_galaxy_id = int(g[6])
+        #         gaia_ra = float(g[7])
+        #         gaia_dec = float(g[8])
+        #         synth_B1 = float(g[9])
+        #         synth_B2 = float(g[10])
+        #         z_phot0 = float(g[11])
+        #         z_photErr = float(g[12])
+        #         N128_SkyPixel_id = int(g[13])
+        #         sep = float(g[14])
+        #
+        #         match_galaxies.append((gd2_id, glade_ra, glade_dec, z, z_dist, B, ps1_galaxy_id, gaia_ra, gaia_dec,
+        #                                synth_B1, synth_B2, z_phot0, z_photErr, N128_SkyPixel_id, sep))
+        #         csvwriter.writerow(g)
+
+        with open(path_format.format(ps1_strm_dir, "GLADE_PS1_Northern_95th.txt"), 'w') as csvfile:
+            csvwriter = csv.writer(csvfile, delimiter=',')
+            csvwriter.writerow(("gd2_id", "glade_ra", "glade_dec", "z", "z_dist", "B"))
+            for g in galaxy_result:
+                gd2_id = int(g[0])
+                glade_ra = float(g[1])
+                glade_dec = float(g[2])
+                z = float(g[3])
+                z_dist = float(g[4])
+                B = float(g[5])
+
+                match_galaxies.append((gd2_id, glade_ra, glade_dec, z, z_dist, B))
+                csvwriter.writerow(g)
+
+    else:
+        # with open(path_format.format(ps1_strm_dir, "GLADE_matched_with_PS1_Northern_95th.txt"), 'r') as csvfile:
+        #     csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+        #     next(csvreader)  # skip header
+        #
+        #     for g in csvreader:
+        #         gd2_id = int(g[0])
+        #         glade_ra = float(g[1])
+        #         glade_dec = float(g[2])
+        #         z = float(g[3])
+        #         z_dist = float(g[4])
+        #         B = float(g[5])
+        #         ps1_galaxy_id = int(g[6])
+        #         gaia_ra = float(g[7])
+        #         gaia_dec = float(g[8])
+        #         synth_B1 = float(g[9])
+        #         synth_B2 = float(g[10])
+        #         z_phot0 = float(g[11])
+        #         z_photErr = float(g[12])
+        #         N128_SkyPixel_id = int(g[13])
+        #         sep = float(g[14])
+        #
+        #         match_galaxies.append((gd2_id, glade_ra, glade_dec, z, z_dist, B, ps1_galaxy_id, gaia_ra, gaia_dec,
+        #                                synth_B1, synth_B2, z_phot0, z_photErr, N128_SkyPixel_id, sep))
+        with open(path_format.format(ps1_strm_dir, "GLADE_PS1_Northern_95th.txt"), 'r') as csvfile:
+            csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+            next(csvreader)  # skip header
+
+            for g in csvreader:
+                gd2_id = int(g[0])
+                glade_ra = float(g[1])
+                glade_dec = float(g[2])
+                z = float(g[3])
+                z_dist = float(g[4])
+                B = float(g[5])
+
+                match_galaxies.append((gd2_id, glade_ra, glade_dec, z, z_dist, B))
+    print("\nMatched sample contains %s galaxies..." % len(match_galaxies))
+
+    # Model the distribution for the redshifts in the galaxy sample.
+    # Sample this distribution for the "true z" of this simulated event
+    # z_values = [g[11] for g in match_galaxies] # g[11] = PS1 phot z
+    z_values = [g[3] for g in match_galaxies]  # g[3] = GLADE phot z
+    z_values_phot = []
+
+
+    # spec_z_err = 1.5e-4  # this is a guess for GLADE galaxies
+    spec_z_err = 4.2e-4  # OzDES error on Q=3 redshifts
+    avg_ps1_fake_z_err = 0.0322 # avg from PS1 STRM
+    for g in match_galaxies:
+        glade_z = g[3]
+        spec_dist = norm(loc=glade_z, scale=avg_ps1_fake_z_err) # use spec mean, but the avg phot err to sample
+
+        fake_z = spec_dist.ppf(random.uniform(0, 1))  # Sampled Distance
+        z_values_phot.append(fake_z)
+
+    z_kde = gaussian_kde(z_values)
+    model_z = np.linspace(0, 0.15, 151)
+    model_z_pdf = z_kde.evaluate(model_z)
+    true_z = z_kde.resample(1)[0][0]
+    # true_zs = z_kde.resample(1000)[0]
+    # true_z = true_zs[0]
+    true_D = c * true_z/H0 # convert to True distance via H0...
+    print("Sampled z: %s" % true_z)
+    print("True D given H0=%s and z=%s: %s Mpc" % (H0, true_z, true_D))
+
+    # Create a distance distribution for this true D
+    measured_D = true_D + (1 if random.random() < 0.5 else -1) * true_D * random.uniform(0.0, 0.25)  # add some noise
+    measured_D_err = measured_D * 0.25
+    measured_D_dist = norm(loc=measured_D, scale=measured_D_err)
+    print("Measured Distance, Err: %s +/- %s Mpc" % (measured_D, measured_D_err))
+
+
+
+    # Process ensemble
+    H0_spec = []
+    H0_spec_err = []
+    H0_spec_dist = []
+
+    H0_phot = []
+    H0_phot_err = []
+    H0_phot_dist = []
+    for i, g in enumerate(match_galaxies):
+        glade_z = g[3]
+        H0_i_spec = (c * glade_z)/measured_D
+        H0_i_err_spec = np.sqrt(spec_z_err**2*(c/measured_D)**2 + measured_D_err**2*(-(c*glade_z)/measured_D**2)**2)
+        H_spec = norm(loc=H0_i_spec, scale=H0_i_err_spec)
+        H0_spec.append(H0_i_spec)
+        H0_spec_err.append(H0_i_err_spec)
+        H0_spec_dist.append(H_spec)
+
+        ps1_z = z_values_phot[i]
+        phot_z_err = avg_ps1_fake_z_err
+        H0_i_phot = (c * ps1_z) / measured_D
+        H0_i_err_phot = np.sqrt(phot_z_err**2*(c/measured_D)**2 + measured_D_err**2*(-(c*ps1_z)/measured_D**2)**2)
+        H_phot = norm(loc=H0_i_phot, scale=H0_i_err_phot)
+
+        H0_phot.append(H0_i_phot)
+        H0_phot_err.append(H0_i_err_phot)
+        H0_phot_dist.append(H_phot)
+
+
+    fig = plt.figure(figsize=(18, 18), dpi=800)
+    ax1 = fig.add_subplot(221)
+
+    n1, bins1, patches1 = ax1.hist(z_values, histtype='step', bins=np.linspace(0, 0.13, 20), color="red",
+                                   density=True, label="GLADE all z\nNorthern 95th\nH0=70\nz=[%0.4f, %0.4f]" %
+                                                       (z_min, z_max))
+
+
+    ax1.plot(model_z, model_z_pdf, 'k--', label="KDE")
+
+    ax1.vlines(true_z, 0, z_kde.pdf(true_z), color='b', linestyle=":", label="'true' z=%0.4f" % (true_z))
+
+    ax1.set_xlabel("GLADE spec z")
+    ax1.set_ylabel("PDF")
+    ax1.set_xlim([0.04, 0.08])
+    ax1.legend(loc="upper left", labelspacing=1.5)
+
+
+    ax2 = fig.add_subplot(222)
+    D0_dist_input = np.linspace(D0 - 3*D0_err, D0 + 3*D0_err, 100)
+    D_dist_input = np.linspace(measured_D - 3 *measured_D_err, measured_D + 3 * measured_D_err, 100)
+    ax2.plot(D0_dist_input, D0_dist.pdf(D0_dist_input), color='r', label="0814\nD=%0.0f+/-%0.0f" % (D0, D0_err))
+    ax2.vlines(true_D, 0, D0_dist.pdf(true_D), colors='b', linestyles=":", label="'true' D=%0.0f Mpc" % true_D)
+    ax2.plot(D_dist_input, measured_D_dist.pdf(D_dist_input), color='k', linestyle='--', label="Measured\nD=%0.0f+/-%0.0f" %
+                                                                                      (measured_D, measured_D_err))
+    ax2.set_xlabel(r"$\mathrm{D_L}$ [Mpc]")
+    ax2.set_ylabel("PDF")
+    ax2.set_ylim(ymin=0)
+    ax2.legend(loc="upper right", labelspacing=1.5)
+
+
+    ax3 = fig.add_subplot(223)
+    H0_input = np.linspace(0.0, 150.0, 300)
+    delta_input = np.abs(H0_input[1] - H0_input[0])
+
+    # running_output_spec = np.zeros(len(H0_input))
+    # for sd in H0_spec_dist:
+    #     running_output_spec = np.add(running_output_spec, sd.pdf(H0_input))
+    # spec_pdf = running_output_spec / trapz(running_output_spec, H0_input)
+    spec_pdf = reduce((lambda x, y: np.add(x, y)), map(lambda x: x.pdf(H0_input), H0_spec_dist))
+    spec_pdf = spec_pdf/trapz(spec_pdf, H0_input) # normalize
+    ax3.plot(H0_input, spec_pdf, color='r')
+
+
+
+
+
+    # def find_nearest_index(array, value):
+    #     array = np.asarray(array)
+    #     idx = (np.abs(array - value)).argmin()
+    #     return idx
+
+    threshold_16 = 0.16
+    threshold_50 = 0.50
+    threshold_84 = 0.84
+
+    spec_running_prob = 0.0
+    spec_index_of_16 = -1
+    spec_index_of_50 = -1
+    spec_index_of_84 = -1
+    spec_found_16 = False
+    spec_found_50 = False
+
+    for i, p in enumerate(spec_pdf):
+
+        spec_running_prob += p * delta_input
+        if spec_running_prob >= threshold_16 and not spec_found_16:
+            spec_found_16 = True
+            spec_index_of_16 = i
+
+        if spec_running_prob >= threshold_50 and not spec_found_50:
+            spec_found_50 = True
+            spec_index_of_50 = i
+
+        if spec_running_prob >= threshold_84:
+            spec_index_of_84 = i
+            break
+
+    spec_median = H0_input[spec_index_of_50]
+    spec_lower_bound = H0_input[spec_index_of_16]
+    spec_upper_bound = H0_input[spec_index_of_84]
+    print(spec_lower_bound, spec_median, spec_upper_bound)
+    spec_frac_err = 100*(spec_upper_bound - spec_lower_bound)/(2 * spec_median)
+
+    ax3.vlines(spec_lower_bound, 0.0, spec_pdf[spec_index_of_16], colors='r', linestyles=':')
+    ax3.vlines(spec_median, 0.0, spec_pdf[spec_index_of_50], colors='r', linestyles='-',
+               label=r"Ensemble H0$\mathrm{_{spec}}$=%0.2f$^{+%0.0f}_{-%0.0f}$ (%0.0f)%%" %
+                     (spec_median, (spec_median - spec_lower_bound), (spec_upper_bound - spec_median), spec_frac_err))
+    ax3.vlines(spec_upper_bound, 0.0, spec_pdf[spec_index_of_84], colors='r', linestyles=':')
+
+
+
+    # running_output_phot = np.zeros(len(H0_input))
+    # for sd in H0_phot_dist:
+    #     running_output_phot = np.add(running_output_phot, sd.pdf(H0_input))
+    # phot_pdf = running_output_phot / trapz(running_output_phot, H0_input)
+    phot_pdf = reduce((lambda x, y: np.add(x, y)), map(lambda x: x.pdf(H0_input), H0_phot_dist))
+    phot_pdf = phot_pdf/trapz(phot_pdf, H0_input)
+
+    ax3.plot(H0_input, phot_pdf, color='k', linestyle='--')
+
+    # get the max value of the dist
+    phot_running_prob = 0.0
+
+    phot_index_of_16 = -1
+    phot_index_of_50 = -1
+    phot_index_of_84 = -1
+    phot_found_16 = False
+    phot_found_50 = False
+
+    for i, p in enumerate(phot_pdf):
+
+        phot_running_prob += p * delta_input
+
+        if phot_running_prob >= threshold_16 and not phot_found_16:
+            phot_found_16 = True
+            phot_index_of_16 = i
+
+        if phot_running_prob >= threshold_50 and not phot_found_50:
+            phot_found_50 = True
+            phot_index_of_50 = i
+
+        if phot_running_prob >= threshold_84:
+            phot_index_of_84 = i
+            break
+
+    phot_median = H0_input[phot_index_of_50]
+    phot_lower_bound = H0_input[phot_index_of_16]
+    phot_upper_bound = H0_input[phot_index_of_84]
+    print(phot_lower_bound, phot_median, phot_upper_bound)
+    phot_frac_err = 100 * (phot_upper_bound - phot_lower_bound) / (2 * phot_median)
+
+    ax3.vlines(phot_lower_bound, 0.0, phot_pdf[phot_index_of_16], colors='k', linestyles=':')
+    ax3.vlines(phot_median, 0.0, phot_pdf[phot_index_of_50], colors='k', linestyles='--',
+               label=r"Ensemble H0$\mathrm{_{phot}}$=%0.2f$^{+%0.0f}_{-%0.0f}$ (%0.0f)%%" %
+                     (phot_median, (phot_median - phot_lower_bound), (phot_upper_bound - phot_median), phot_frac_err))
+    ax3.vlines(phot_upper_bound, 0.0, phot_pdf[phot_index_of_84], colors='k', linestyles=':')
+
+
+    ax3.set_xlabel(r"$\mathrm{H_0}$ [km s$^-1$ Mpc$^-1$]")
+    ax3.set_ylabel("PDF")
+    ax3.set_ylim(ymin=0)
+
+    ax3.set_xlim([10, 150])
+
+    ax3.legend(loc="upper right", labelspacing=1.5)
+
+    # ax4 = fig.add_subplot(224)
+    # test_sum = reduce((lambda x, y: np.add(x, y)), map(lambda x: x.pdf(H0_input), H0_spec_dist))
+    # ax4.plot(H0_input, test_sum)
+    # ax4.set_ylim(ymin=0)
+    # ax4.set_xlim([10, 150])
+
+
+    fig.savefig("H0_sample_test.png", bbox_inches='tight')
+    plt.close('all')
+
+    end = time.time()
+    duration = (end - start)
+    print("\n********* start DEBUG ***********")
+    print("Execution time: %s" % duration)
+    print("********* end DEBUG ***********\n")
+
+if h0_calc_test_multiple_sample:
+
+    start = time.time()
+
+    # Global variables
+    H0 = 70  # km/s/Mpc
+    c = 2.998e+5  # km/s
+    D0 = 267.
+    D0_err = 52.
+    D0_dist = norm(loc=D0, scale=D0_err)
+    print("Original Distance, Err: %s +/- %s Mpc" % (D0, D0_err))
+
+    # z bounds given D0 and H0
+    z_min = (H0 * (D0 - D0_err)) / c
+    z_max = (H0 * (D0 + D0_err)) / c
+    print("\nz bounds [%s, %s]\n" % (z_min, z_max))
+
+    def get_confidence_intervals(x_arr, y_arr):
+        delta_input = x_arr[1] - x_arr[0]
+        threshold_16 = 0.16
+        threshold_50 = 0.50
+        threshold_84 = 0.84
+        running_prob = 0.0
+        index_of_16 = -1
+        index_of_50 = -1
+        index_of_84 = -1
+        found_16 = False
+        found_50 = False
+
+        for i, p in enumerate(y_arr):
+
+            running_prob += p * delta_input
+            if running_prob >= threshold_16 and not found_16:
+                found_16 = True
+                index_of_16 = i
+
+            if running_prob >= threshold_50 and not found_50:
+                found_50 = True
+                index_of_50 = i
+
+            if running_prob >= threshold_84:
+                index_of_84 = i
+                break
+
+        if index_of_16 == -1 or index_of_50 == -1 or index_of_84 == -1:
+            print("\n\n************************************")
+            print(x_arr)
+            print(y_arr)
+            print(i)
+            print(index_of_16)
+            print(index_of_50)
+            print(index_of_84)
+            raise Exception("Could not find indices!")
+
+        median_xval = x_arr[index_of_50]
+        xval_lower_bound = x_arr[index_of_16]
+        xval_upper_bound = x_arr[index_of_84]
+        frac_measurement = 100 * (xval_upper_bound - xval_lower_bound) / (2 * median_xval)
+
+        return xval_lower_bound, index_of_16, median_xval, index_of_50, xval_upper_bound, index_of_84, frac_measurement
+
+    # Start iteration here
+    percent_spec_measurement = 999
+    percent_phot_measurement = 999
+    threshold_measurement = 3
+
+    distance_dists = []
+    spec_dists = []
+    phot_dists = []
+    joint_spec_min_H0 = joint_spec_median_H0 = joint_spec_max_H0 = 999
+    index_spec_min_H0 = index_spec_median_H0 = index_spec_max_H0 = 999
+    joint_spec_pdf = None
+    joint_phot_pdf = None
+    H0_input = np.linspace(0.0, 150.0, 300)
+    fig = plt.figure(figsize=(18, 18), dpi=800)
+    ax1 = fig.add_subplot(221)
+    ax2 = fig.add_subplot(222)
+
+    select_complete_pixels = '''
+        SELECT sp.id as SkyPixel_id, sp.Pixel_Index, sp.Pixel_Index, sp.RA, sp._Dec, sc.SmoothedCompleteness 
+        FROM SkyCompleteness sc  
+        JOIN SkyDistance sd on sd.id = sc.SkyDistance_id 
+        JOIN SkyPixel sp on sp.id = sc.SkyPixel_id 
+        WHERE sd.id BETWEEN 47 AND 64 AND 
+            sc.SmoothedCompleteness >= 0.9 
+    '''
+
+    skypixel_result = query_db([select_complete_pixels])[0]
+    skypixel_ids = []
+    for sp in skypixel_result:
+        if sp[0] not in skypixel_ids:
+            skypixel_ids.append(sp[0])
+
+    print("Number of skypixels: %s" % len(skypixel_ids))
+    print("Starting iterations...")
+    while percent_spec_measurement > threshold_measurement and len(spec_dists) < len(skypixel_ids):
+
+        iteration_index = len(spec_dists)
+        iter_str = str(iteration_index + 1)
+
+        # Get galaxies in highly complete pixels
+        print("\nQuery pixel id %s" % skypixel_ids[iteration_index])
+        select_galaxies = '''
+            SELECT 
+                gd2.z
+            FROM GalaxyDistance2 gd2
+            JOIN SkyPixel_GalaxyDistance2 sp_gd2 ON sp_gd2.GalaxyDistance2_id = gd2.id
+            WHERE sp_gd2.SkyPixel_id = %s AND gd2.z BETWEEN %s AND %s  
+        '''
+        galaxy_result = query_db([select_galaxies % (skypixel_ids[iteration_index], z_min, z_max)])[0]
+        z_values = [float(g[0]) for g in galaxy_result]
+        print("Iteration %s sample contains %s galaxies..." % (iter_str, len(z_values)))
+
+        # spec_z_err = 1.5e-4  # this is a guess for GLADE galaxies
+        spec_z_err = 4.2e-4  # OzDES error on Q=3 redshifts
+
+        z_kde = gaussian_kde(z_values)
+        model_z = np.linspace(0, 0.15, 151)
+        model_z_pdf = z_kde.evaluate(model_z)
+        true_z = z_kde.resample(1)[0][0]
+        true_D = c * true_z / H0  # convert to True distance via H0...
+        print("Sampled z: %s" % true_z)
+        print("True D given H0=%s and z=%s: %s Mpc" % (H0, true_z, true_D))
+
+        print("Iter %s: percent measurement: %0.0f" % (iter_str, percent_spec_measurement))
+
+        # Create a distance distribution for this true D
+        measured_D = true_D + (1 if random.random() < 0.5 else -1) * true_D * random.uniform(0.0, 0.25)  # add some noise
+        measured_D_err = measured_D * 0.25
+        measured_D_dist = norm(loc=measured_D, scale=measured_D_err)
+        print("Measured Distance, Err: %s +/- %s Mpc" % (measured_D, measured_D_err))
+
+        # Process ensemble
+        H0_spec = []
+        H0_spec_err = []
+        H0_spec_dist = []
+
+        for i, glade_z in enumerate(z_values):
+            H0_i_spec = (c * glade_z)/measured_D
+            H0_i_err_spec = np.sqrt(spec_z_err**2*(c/measured_D)**2 + measured_D_err**2*(-(c*glade_z)/measured_D**2)**2)
+            H_spec = norm(loc=H0_i_spec, scale=H0_i_err_spec)
+            H0_spec.append(H0_i_spec)
+            H0_spec_err.append(H0_i_err_spec)
+            H0_spec_dist.append(H_spec)
+
+        spec_pdf = reduce((lambda x, y: np.add(x, y)), map(lambda z: z.pdf(H0_input), H0_spec_dist))
+        # spec_pdf = spec_pdf / trapz(spec_pdf, H0_input)  # normalize
+        spec_pdf_norm = spec_pdf / trapz(spec_pdf, H0_input)  # normalize
+
+        joint_spec_min_H0, index_spec_min_H0, joint_spec_median_H0, index_spec_median_H0, joint_spec_max_H0, \
+            index_spec_max_H0, percent_spec_measurement = get_confidence_intervals(H0_input, spec_pdf)
+
+        spec_dists.append(spec_pdf)
+
+        joint_spec_pdf = reduce((lambda x, y: np.multiply(x, y)), spec_dists)
+        joint_spec_pdf = joint_spec_pdf / trapz(joint_spec_pdf, H0_input)  # normalize
+
+        joint_spec_min_H0, index_spec_min_H0, joint_spec_median_H0, index_spec_median_H0, joint_spec_max_H0, \
+        index_spec_max_H0, percent_spec_measurement = get_confidence_intervals(H0_input, joint_spec_pdf)
+
+        # if len(spec_dists) > 1:
+        #     joint_spec_pdf = reduce((lambda x, y: np.multiply(x, y)), spec_dists)
+        #     joint_spec_pdf = joint_spec_pdf / trapz(joint_spec_pdf, H0_input)  # normalize
+        #
+        #     joint_spec_min_H0, index_spec_min_H0, joint_spec_median_H0, index_spec_median_H0, joint_spec_max_H0, \
+        #     index_spec_max_H0, percent_spec_measurement = get_confidence_intervals(H0_input, joint_spec_pdf)
+        # else:
+        #     joint_spec_pdf = spec_pdf
+
+        # , label=r"iter=%s; dist=%0.0f$\pm$%0.0f Mpc" % (str(len(spec_dists)+1), measured_D, measured_D_err)
+        # ax1.plot(H0_input, spec_pdf, color="gray", alpha=0.2)
+        ax1.plot(H0_input, spec_pdf_norm, color="gray", alpha=0.2)
+
+        # distance_dists.append(measured_D_dist)
+        # spec_dists.append(spec_pdf)
+
+    while percent_phot_measurement > threshold_measurement and len(phot_dists) < len(skypixel_ids):
+
+        iteration_index = len(phot_dists)
+        iter_str = str(iteration_index + 1)
+
+        # Get galaxies in highly complete pixels
+        print("\nQuery pixel id %s" % skypixel_ids[iteration_index])
+        select_galaxies = '''
+            SELECT 
+                gd2.z
+            FROM GalaxyDistance2 gd2
+            JOIN SkyPixel_GalaxyDistance2 sp_gd2 ON sp_gd2.GalaxyDistance2_id = gd2.id
+            WHERE sp_gd2.SkyPixel_id = %s AND gd2.z BETWEEN %s AND %s  
+        '''
+        galaxy_result = query_db([select_galaxies % (skypixel_ids[iteration_index], z_min, z_max)])[0]
+        z_values = [float(g[0]) for g in galaxy_result]
+        print("Iteration %s sample contains %s galaxies..." % (iter_str, len(z_values)))
+
+        # spec_z_err = 1.5e-4  # this is a guess for GLADE galaxies
+        spec_z_err = 4.2e-4  # OzDES error on Q=3 redshifts
+        avg_ps1_fake_z_err = 0.0322  # avg from PS1 STRM
+        z_values_phot = []
+        for glade_z in z_values:
+            fake_z_dist = norm(loc=glade_z, scale=avg_ps1_fake_z_err)  # use spec mean, but the avg phot err to sample
+            fake_z = fake_z_dist.ppf(random.uniform(0, 1))  # Sampled Distance
+            z_values_phot.append(fake_z)
+
+        z_kde = gaussian_kde(z_values)
+        model_z = np.linspace(0, 0.15, 151)
+        model_z_pdf = z_kde.evaluate(model_z)
+        true_z = z_kde.resample(1)[0][0]
+        true_D = c * true_z / H0  # convert to True distance via H0...
+        print("Sampled z: %s" % true_z)
+        print("True D given H0=%s and z=%s: %s Mpc" % (H0, true_z, true_D))
+        print("Iter %s: percent measurement: %0.0f" % (iter_str, percent_spec_measurement))
+
+        # Create a distance distribution for this true D
+        measured_D = true_D + (1 if random.random() < 0.5 else -1) * true_D * random.uniform(0.0, 0.25)  # add some noise
+        measured_D_err = measured_D * 0.25
+        measured_D_dist = norm(loc=measured_D, scale=measured_D_err)
+        print("Measured Distance, Err: %s +/- %s Mpc" % (measured_D, measured_D_err))
+
+        # Process ensemble
+        H0_phot = []
+        H0_phot_err = []
+        H0_phot_dist = []
+        for i, glade_z in enumerate(z_values):
+            ps1_z = z_values_phot[i]
+            phot_z_err = avg_ps1_fake_z_err
+            H0_i_phot = (c * ps1_z) / measured_D
+            H0_i_err_phot = np.sqrt(phot_z_err**2*(c/measured_D)**2 + measured_D_err**2*(-(c*ps1_z)/measured_D**2)**2)
+            H_phot = norm(loc=H0_i_phot, scale=H0_i_err_phot)
+
+            H0_phot.append(H0_i_phot)
+            H0_phot_err.append(H0_i_err_phot)
+            H0_phot_dist.append(H_phot)
+
+        phot_pdf = reduce((lambda x, y: np.add(x, y)), map(lambda z: z.pdf(H0_input), H0_phot_dist))
+        # phot_pdf = phot_pdf / trapz(phot_pdf, H0_input)  # normalize
+        phot_pdf_norm = phot_pdf / trapz(phot_pdf, H0_input)  # normalize
+
+        joint_phot_min_H0, index_phot_min_H0, joint_phot_median_H0, index_phot_median_H0, joint_phot_max_H0, \
+            index_phot_max_H0, percent_phot_measurement = get_confidence_intervals(H0_input, phot_pdf)
+        phot_dists.append(phot_pdf)
+
+        joint_phot_pdf = reduce((lambda x, y: np.multiply(x, y)), phot_dists)
+        joint_phot_pdf = joint_phot_pdf / trapz(joint_phot_pdf, H0_input)  # normalize
+        # joint_phot_pdf = joint_phot_pdf / trapz(joint_phot_pdf, H0_input)  # normalize
+
+        joint_phot_min_H0, index_phot_min_H0, joint_phot_median_H0, index_phot_median_H0, joint_phot_max_H0, \
+        index_phot_max_H0, percent_phot_measurement = get_confidence_intervals(H0_input, joint_phot_pdf)
+
+        # if len(phot_dists) > 1:
+            # joint_phot_pdf = reduce((lambda x, y: np.multiply(x, y)), phot_dists)
+            # joint_phot_pdf = joint_phot_pdf / trapz(joint_phot_pdf, H0_input)  # normalize
+            #
+            # joint_phot_min_H0, index_phot_min_H0, joint_phot_median_H0, index_phot_median_H0, joint_phot_max_H0, \
+            # index_phot_max_H0, percent_phot_measurement = get_confidence_intervals(H0_input, joint_phot_pdf)
+        # else:
+        #     joint_phot_pdf = phot_pdf
+
+        # , label=r"iter=%s; dist=%0.0f$\pm$%0.0f Mpc" % (str(len(spec_dists)+1), measured_D, measured_D_err)
+        # ax2.plot(H0_input, phot_pdf, color="gray", alpha=0.2)
+        ax2.plot(H0_input, phot_pdf_norm, color="gray", alpha=0.2)
+
+        # distance_dists.append(measured_D_dist)
+        # phot_dists.append(phot_pdf)
+
+    ax1.plot(H0_input, joint_spec_pdf, color='r', linewidth=2)
+    ax1.vlines(joint_spec_min_H0, 0.0, joint_spec_pdf[index_spec_min_H0], colors='r', linestyles=':')
+    ax1.vlines(joint_spec_median_H0, 0.0, joint_spec_pdf[index_spec_median_H0], colors='r', linestyles='-',
+               label=r"iter=%s H0$\mathrm{_{spec}}$=%0.2f$^{+%0.2f}_{-%0.2f}$ (%0.2f)%%" %
+                     (str(len(spec_dists)), joint_spec_median_H0, (joint_spec_median_H0 - joint_spec_min_H0),
+                      (joint_spec_max_H0 - joint_spec_median_H0), percent_spec_measurement))
+    ax1.vlines(joint_spec_max_H0, 0.0, joint_spec_pdf[index_spec_max_H0], colors='r', linestyles=':')
+
+    ax1.set_xlabel(r"$\mathrm{H_0}$ [km s$^-1$ Mpc$^-1$]")
+    ax1.set_ylabel("PDF")
+    ax1.set_ylim(ymin=0)
+    ax1.set_xlim([10, 150])
+    ax1.legend(loc="upper right", labelspacing=1.5)
+
+
+    ax2.plot(H0_input, joint_phot_pdf, color='k', linewidth=2)
+    ax2.vlines(joint_phot_min_H0, 0.0, joint_phot_pdf[index_phot_min_H0], colors='k', linestyles=':')
+    ax2.vlines(joint_phot_median_H0, 0.0, joint_phot_pdf[index_phot_median_H0], colors='k', linestyles='-',
+               label=r"iter=%s H0$\mathrm{_{phot}}$=%0.2f$^{+%0.2f}_{-%0.2f}$ (%0.2f)%%" %
+                     (str(len(phot_dists)), joint_phot_median_H0, (joint_phot_median_H0 - joint_phot_min_H0),
+                      (joint_phot_max_H0 - joint_phot_median_H0), percent_phot_measurement))
+    ax2.vlines(joint_phot_max_H0, 0.0, joint_phot_pdf[index_phot_max_H0], colors='k', linestyles=':')
+
+    ax2.set_xlabel(r"$\mathrm{H_0}$ [km s$^-1$ Mpc$^-1$]")
+    ax2.set_ylabel("PDF")
+    ax2.set_ylim(ymin=0)
+    ax2.set_xlim([10, 150])
+    ax2.legend(loc="upper right", labelspacing=1.5)
+
+    fig.savefig("h0_calc_test_multiple_sample.png", bbox_inches='tight')
+    plt.close('all')
+
+    # fig = plt.figure(figsize=(18, 18), dpi=800)
+    # ax1 = fig.add_subplot(221)
+    #
+    # n1, bins1, patches1 = ax1.hist(z_values, histtype='step', bins=np.linspace(0, 0.13, 20), color="red",
+    #                                density=True, label="GLADE all z\nNorthern 95th\nH0=70\nz=[%0.4f, %0.4f]" %
+    #                                                    (z_min, z_max))
+    #
+    # ax1.plot(model_z, model_z_pdf, 'k--', label="KDE")
+    # ax1.vlines(true_z, 0, z_kde.pdf(true_z), color='b', linestyle=":", label="'true' z=%0.4f" % (true_z))
+    # ax1.set_xlabel("GLADE spec z")
+    # ax1.set_ylabel("PDF")
+    # ax1.set_xlim([0.04, 0.08])
+    # ax1.legend(loc="upper left", labelspacing=1.5)
+    #
+    #
+    # # ax2 = fig.add_subplot(222)
+    # # D0_dist_input = np.linspace(D0 - 3*D0_err, D0 + 3*D0_err, 100)
+    # # D_dist_input = np.linspace(measured_D - 3 *measured_D_err, measured_D + 3 * measured_D_err, 100)
+    # # ax2.plot(D0_dist_input, D0_dist.pdf(D0_dist_input), color='r', label="0814\nD=%0.0f+/-%0.0f" % (D0, D0_err))
+    # # ax2.vlines(true_D, 0, D0_dist.pdf(true_D), colors='b', linestyles=":", label="'true' D=%0.0f Mpc" % true_D)
+    # # ax2.plot(D_dist_input, measured_D_dist.pdf(D_dist_input), color='k', linestyle='--', label="Measured\nD=%0.0f+/-%0.0f" %
+    # #                                                                                   (measured_D, measured_D_err))
+    # # ax2.set_xlabel(r"$\mathrm{D_L}$ [Mpc]")
+    # # ax2.set_ylabel("PDF")
+    # # ax2.set_ylim(ymin=0)
+    # # ax2.legend(loc="upper right", labelspacing=1.5)
+    #
+    #
+    # ax3 = fig.add_subplot(223)
+    #
+    # delta_input = np.abs(H0_input[1] - H0_input[0])
+    #
+    # running_output_spec = np.zeros(len(H0_input))
+    # for sd in H0_spec_dist:
+    #     running_output_spec = np.add(running_output_spec, sd.pdf(H0_input))
+    # spec_pdf = running_output_spec / trapz(running_output_spec, H0_input)
+    # ax3.plot(H0_input, spec_pdf, color='r')
+    #
+    #
+    # # def find_nearest_index(array, value):
+    # #     array = np.asarray(array)
+    # #     idx = (np.abs(array - value)).argmin()
+    # #     return idx
+    #
+    # threshold_16 = 0.16
+    # threshold_50 = 0.50
+    # threshold_84 = 0.84
+    #
+    # spec_running_prob = 0.0
+    # spec_index_of_16 = -1
+    # spec_index_of_50 = -1
+    # spec_index_of_84 = -1
+    # spec_found_16 = False
+    # spec_found_50 = False
+    #
+    # for i, p in enumerate(spec_pdf):
+    #
+    #     spec_running_prob += p * delta_input
+    #     if spec_running_prob >= threshold_16 and not spec_found_16:
+    #         spec_found_16 = True
+    #         spec_index_of_16 = i
+    #
+    #     if spec_running_prob >= threshold_50 and not spec_found_50:
+    #         spec_found_50 = True
+    #         spec_index_of_50 = i
+    #
+    #     if spec_running_prob >= threshold_84:
+    #         spec_index_of_84 = i
+    #         break
+    #
+    # spec_median = H0_input[spec_index_of_50]
+    # spec_lower_bound = H0_input[spec_index_of_16]
+    # spec_upper_bound = H0_input[spec_index_of_84]
+    # print(spec_lower_bound, spec_median, spec_upper_bound)
+    # spec_frac_err = 100*(spec_upper_bound - spec_lower_bound)/(2 * spec_median)
+    #
+    # ax3.vlines(spec_lower_bound, 0.0, spec_pdf[spec_index_of_16], colors='r', linestyles=':')
+    # ax3.vlines(spec_median, 0.0, spec_pdf[spec_index_of_50], colors='r', linestyles='-',
+    #            label=r"Ensemble H0$\mathrm{_{spec}}$=%0.2f$^{+%0.0f}_{-%0.0f}$ (%0.0f)%%" %
+    #                  (spec_median, (spec_median - spec_lower_bound), (spec_upper_bound - spec_median), spec_frac_err))
+    # ax3.vlines(spec_upper_bound, 0.0, spec_pdf[spec_index_of_84], colors='r', linestyles=':')
+    #
+    #
+    #
+    # running_output_phot = np.zeros(len(H0_input))
+    # for sd in H0_phot_dist:
+    #     running_output_phot = np.add(running_output_phot, sd.pdf(H0_input))
+    # phot_pdf = running_output_phot / trapz(running_output_phot, H0_input)
+    #
+    # ax3.plot(H0_input, phot_pdf, color='k', linestyle='--')
+    #
+    # # get the max value of the dist
+    # phot_running_prob = 0.0
+    #
+    # phot_index_of_16 = -1
+    # phot_index_of_50 = -1
+    # phot_index_of_84 = -1
+    # phot_found_16 = False
+    # phot_found_50 = False
+    #
+    # for i, p in enumerate(phot_pdf):
+    #
+    #     phot_running_prob += p * delta_input
+    #
+    #     if phot_running_prob >= threshold_16 and not phot_found_16:
+    #         phot_found_16 = True
+    #         phot_index_of_16 = i
+    #
+    #     if phot_running_prob >= threshold_50 and not phot_found_50:
+    #         phot_found_50 = True
+    #         phot_index_of_50 = i
+    #
+    #     if phot_running_prob >= threshold_84:
+    #         phot_index_of_84 = i
+    #         break
+    #
+    # phot_median = H0_input[phot_index_of_50]
+    # phot_lower_bound = H0_input[phot_index_of_16]
+    # phot_upper_bound = H0_input[phot_index_of_84]
+    # print(phot_lower_bound, phot_median, phot_upper_bound)
+    # phot_frac_err = 100 * (phot_upper_bound - phot_lower_bound) / (2 * phot_median)
+    #
+    # ax3.vlines(phot_lower_bound, 0.0, phot_pdf[phot_index_of_16], colors='k', linestyles=':')
+    # ax3.vlines(phot_median, 0.0, phot_pdf[phot_index_of_50], colors='k', linestyles='--',
+    #            label=r"Ensemble H0$\mathrm{_{phot}}$=%0.2f$^{+%0.0f}_{-%0.0f}$ (%0.0f)%%" %
+    #                  (phot_median, (phot_median - phot_lower_bound), (phot_upper_bound - phot_median), phot_frac_err))
+    # ax3.vlines(phot_upper_bound, 0.0, phot_pdf[phot_index_of_84], colors='k', linestyles=':')
+    #
+    #
+    # ax3.set_xlabel(r"$\mathrm{H_0}$ [km s$^-1$ Mpc$^-1$]")
+    # ax3.set_ylabel("PDF")
+    # ax3.set_ylim(ymin=0)
+    #
+    # ax3.set_xlim([10, 150])
+    #
+    # ax3.legend(loc="upper right", labelspacing=1.5)
+    #
+    #
+    # fig.savefig("H0_sample_test.png", bbox_inches='tight')
+    # plt.close('all')
+
+    end = time.time()
+    duration = (end - start)
+    print("\n********* start DEBUG ***********")
+    print("Execution time: %s" % duration)
+    print("********* end DEBUG ***********\n")
+
+
+
+
+
 
 
 

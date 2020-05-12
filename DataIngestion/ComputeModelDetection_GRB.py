@@ -89,9 +89,14 @@ from scipy.integrate import simps
 from scipy import stats
 
 from astropy.table import Table
+from astropy.time import Time, TimeMJD
 import pdb
 import re
 
+
+import pytz
+
+from functools import reduce
 
 # endregion
 
@@ -116,7 +121,7 @@ config["data_dir"] = "./"
 # Generate all pixel indices
 cosmo = LambdaCDM(H0=70, Om0=0.3, Ode0=0.7)
 # GW190814_t_0 = 58709.882824224536  # time of GW190814 merger
-GW190814_t_0 = 58598.346134259256  # time of GW190425 merger
+# GW190814_t_0 = 58598.346134259256  # time of GW190425 merger
 
 # endregion
 
@@ -430,6 +435,10 @@ class Teglon:
         parser.add_option('--batch_dir', default="", type="str",
                           help='GRB Model sub sub directory (for batching... lol)')
 
+        parser.add_option('--merger_time_MJD', default="58709.882824224536", type="float",
+                          help='''Time of the merger in MJD. This is used to compute where on the light curve we are. 
+                          Default to GW190814''')
+
         return (parser)
 
     def main(self):
@@ -439,6 +448,12 @@ class Teglon:
         prep_start = time.time()
 
         is_error = False
+
+
+        merger_time = self.options.merger_time_MJD
+        t = Time(merger_time, format='mjd')
+        print("** Running models for MJD: %s; UTC: %s **" % (merger_time, t.to_datetime(timezone=pytz.utc)))
+
 
         # Parameter checks
         if self.options.gw_id == "":
@@ -861,8 +876,17 @@ class Teglon:
                     pix_synopsis_new.delta_mjds[band_name] = {}
                     pix_synopsis_new.lim_mags[band_name] = {}
 
+                # DEBUG
+                if t.mjd in pix_synopsis_new.lim_mags[band_name]:
+                    if pix_synopsis_new.lim_mags[band_name][t.mjd] != t.mag_lim:
+                        print("Collision! Tile: %s" % t)
+                        print("MJD: %s" % t.mjd)
+                        print("Previous mag lim: %s" % pix_synopsis_new.lim_mags[band_name][t.mjd])
+                        print("New mag lim: %s" % t.mag_lim)
+                # DEBUG
+
                 # time-dilate the delta_mjd, which is used to get the Abs Mag LC point
-                pix_synopsis_new.delta_mjds[band_name][t.mjd] = (t.mjd - GW190814_t_0) / (1.0 + pix_synopsis_new.z)
+                pix_synopsis_new.delta_mjds[band_name][t.mjd] = (t.mjd - merger_time) / (1.0 + pix_synopsis_new.z)
                 pix_synopsis_new.lim_mags[band_name][t.mjd] = (t.mag_lim)
 
         print("\nInitializing %s models..." % len(models))
@@ -886,8 +910,6 @@ class Teglon:
                                 pix_a_lambda = pix_synopsis.pix_ebv * band_coeff
                                 pix_synopsis.A_lambda[band_name] = pix_a_lambda
 
-        prep_end = time.time()
-        print("Prep time: %s [seconds]" % (prep_end - prep_start))
         # endregion
 
         compute_start = time.time()
@@ -911,6 +933,10 @@ class Teglon:
         compute_end = time.time()
         print("Update `map_pixel_dict_new` time: %s [seconds]" % (compute_end - compute_start))
 
+
+
+        prep_end = time.time()
+        print("Prep time: %s [seconds]" % (prep_end - prep_start))
 
 
         # with open('%s/%s_models.pkl' % (formatted_model_output_dir, self.options.gw_id), 'wb') as handle:
@@ -989,65 +1015,172 @@ class Teglon:
 
 
 
-
-
-
-
-
-        # region Serialization
-        # Finally, get the highest valued integration, and sum
-        running_sums = {}  # model:band:value
-
-        for pix_index, pix_synopsis in map_pixel_dict_new.items():
-            for band in pix_synopsis.measured_bands:
-                for model_param_tuple, model_dict in models.items():
-
-                    pix_max = 0.0
-                    if model_param_tuple not in running_sums:
-                        running_sums[model_param_tuple] = {}
-
-                    try:
-                        t = running_sums[model_param_tuple][band]
-                    except:
-                        running_sums[model_param_tuple][band] = 0.0
-
-                    probs = []
-                    for mjd, integrated_prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
-                        probs.append(integrated_prob)
-
-                    pix_max = np.max(probs)
-                    running_sums[model_param_tuple][band] += pix_max
-
-        # # Report to stdout the results per model...
-        # for model_param_tuple, band_dict in running_sums.items():
-        #     print("\nIntegrated prob to detect model (E=%s, n=%s, theta_obs=%s)" % model_param_tuple)
         #
-        #     for band, running_sum in band_dict.items():
-        #         print("\t%s: %s" % (band, running_sum))
-
-        # ########################################
-        # # Hack to test linear models. Remove. DC
-        # for model_param_tuple, band_dict in running_sums.items():
-        #     print("\nIntegrated prob to detect model (M=%s, dM=%s)" % model_param_tuple)
+        # # region Serialization
+        # # Finally, get the highest valued integration, and sum
+        # running_sums = {}  # model:band:value
         #
-        #     for band, running_sum in band_dict.items():
-        #         print("\t%s: %s" % (band, running_sum))
-        # ########################################
+        # for pix_index, pix_synopsis in map_pixel_dict_new.items():
+        #     for band in pix_synopsis.measured_bands:
+        #         for model_param_tuple, model_dict in models.items():
+        #
+        #             pix_max = 0.0
+        #             if model_param_tuple not in running_sums:
+        #                 running_sums[model_param_tuple] = {}
+        #
+        #             try:
+        #                 t = running_sums[model_param_tuple][band]
+        #             except:
+        #                 running_sums[model_param_tuple][band] = 0.0
+        #
+        #             probs = []
+        #             for mjd, integrated_prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
+        #                 probs.append(integrated_prob)
+        #
+        #             pix_max = np.max(probs)
+        #             running_sums[model_param_tuple][band] += pix_max
+        #
+        # # # Report to stdout the results per model...
+        # # for model_param_tuple, band_dict in running_sums.items():
+        # #     print("\nIntegrated prob to detect model (E=%s, n=%s, theta_obs=%s)" % model_param_tuple)
+        # #
+        # #     for band, running_sum in band_dict.items():
+        # #         print("\t%s: %s" % (band, running_sum))
+        #
+        # # ########################################
+        # # # Hack to test linear models. Remove. DC
+        # # for model_param_tuple, band_dict in running_sums.items():
+        # #     print("\nIntegrated prob to detect model (M=%s, dM=%s)" % model_param_tuple)
+        # #
+        # #     for band, running_sum in band_dict.items():
+        # #         print("\t%s: %s" % (band, running_sum))
+        # # ########################################
+        #
+        # # Serialize results: for every pixel, just get the highest prob
+        # running_sums2 = {}
+        # for model_param_tuple, model_dict in models.items():
+        #     running_sums2[model_param_tuple] = 0.0
+        #
+        #     for pix_index, pix_synopsis in map_pixel_dict_new.items():
+        #         pix_max = 0.0
+        #         probs = []
+        #         for band in pix_synopsis.measured_bands:
+        #             for mjd, integrated_prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
+        #                 probs.append(integrated_prob)
+        #
+        #         pix_max = np.max(probs)
+        #         running_sums2[model_param_tuple] += pix_max
 
-        # Serialize results: for every pixel, just get the highest prob
-        running_sums2 = {}
+
+
+
+
+
+
+
+        ## NEW (Take binomial product of chance seeing it in each epoch)
+        # probability by model by band by pixel, for all epochs per pixel
+        probs_by_model_band_pix_index = {}
+
+        # summed pixel probability by model and band
+        probs_by_model_band = {}
+
+        # final probability by model
+        net_prob_by_model = {}
+
         for model_param_tuple, model_dict in models.items():
-            running_sums2[model_param_tuple] = 0.0
+
+            # Initialize the model key for each dictionary
+            if model_param_tuple not in net_prob_by_model:
+                net_prob_by_model[model_param_tuple] = {}
+
+            if model_param_tuple not in probs_by_model_band:
+                probs_by_model_band[model_param_tuple] = {}
+
+            if model_param_tuple not in probs_by_model_band_pix_index:
+                probs_by_model_band_pix_index[model_param_tuple] = {}
 
             for pix_index, pix_synopsis in map_pixel_dict_new.items():
-                pix_max = 0.0
-                probs = []
                 for band in pix_synopsis.measured_bands:
-                    for mjd, integrated_prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
-                        probs.append(integrated_prob)
 
-                pix_max = np.max(probs)
-                running_sums2[model_param_tuple] += pix_max
+                    # Initialize the band key for each dictionary
+                    if band not in probs_by_model_band_pix_index[model_param_tuple]:
+                        probs_by_model_band_pix_index[model_param_tuple][band] = {}
+
+                    if band not in probs_by_model_band[model_param_tuple]:
+                        probs_by_model_band[model_param_tuple][band] = {}
+
+                    # sanity -- if the pixel prob is itself 0.0, we can just skip
+                    if pix_synopsis.prob_2D <= 0:
+                        probs_by_model_band_pix_index[model_param_tuple][band][pix_index] = 0.0
+                        continue
+
+                    # For each pixel:
+                    #   take the compliment from each epoch's integrated probability
+                    #   take the product of these compliments (the product of the individual marginal probabilities of a non-detection)
+                    #   take the compliment of this join marginal probability to find the prob of at least one detection
+
+                    test = 1.0 - reduce(lambda y, z: y * z,
+                                        map(lambda x: (1.0 - x),
+                                            [p[1] for p in
+                                             pix_synopsis.best_integrated_probs[model_param_tuple][band].items()]))
+
+                    product_of_compliments = 1.0
+
+                    test_probs = []
+                    for mjd, prob in pix_synopsis.best_integrated_probs[model_param_tuple][band].items():
+                        product_of_compliments *= (1.0 - prob / pix_synopsis.prob_2D)
+                        test_probs.append(prob)
+
+                    compliment_of_product_of_compliments = pix_synopsis.prob_2D * (1 - product_of_compliments)
+
+                    probs_by_model_band_pix_index[model_param_tuple][band][
+                        pix_index] = compliment_of_product_of_compliments
+
+            # Sum all pixels for a given band and model, that makes up the per model, per band prob
+            for band, pix_prob_dict in probs_by_model_band_pix_index[model_param_tuple].items():
+
+                test2 = reduce(lambda x, y: x + y, [p[1] for p in pix_prob_dict.items()])
+
+                summed_prob = 0.0
+                for pix_index, prob in pix_prob_dict.items():
+                    summed_prob += prob
+
+                probs_by_model_band[model_param_tuple][band] = summed_prob
+
+                # print("Summed prob for band [%s]: %s" % (band, summed_prob))
+
+            # Finally, as above, take the compliment of the product of the compliments for each band
+            # to compute the probability of at least 1 detection in any band
+            test3 = 1.0 - reduce(lambda y, z: y * z,
+                                 map(lambda x: (1.0 - x),
+                                     [p[1] for p in probs_by_model_band[model_param_tuple].items()]))
+
+            total_covered_prob = 0.0
+            for pix_index, pix_synopsis in map_pixel_dict_new.items():
+                total_covered_prob += pix_synopsis.prob_2D
+
+            # print("Total covered prob: %s" % total_covered_prob)
+
+            net_product_of_compliments = 1.0
+            for band, sum_prob in probs_by_model_band[model_param_tuple].items():
+                net_product_of_compliments *= (1.0 - sum_prob / total_covered_prob)
+
+            net_compliment_of_product_of_compliments = total_covered_prob * (1.0 - net_product_of_compliments)
+
+            print("Total model prob: %s" % net_compliment_of_product_of_compliments)
+
+            net_prob_by_model[model_param_tuple] = net_compliment_of_product_of_compliments
+
+
+
+
+
+
+
+
+
+
 
         cols = ['E', 'n', 'theta_obs', 'Prob']
         dtype = ['f8', 'f8', 'f8', 'f8']
@@ -1059,7 +1192,7 @@ class Teglon:
         # ########################################
         result_table = Table(dtype=dtype, names=cols)
 
-        for model_param_tuple, prob in running_sums2.items():
+        for model_param_tuple, prob in net_prob_by_model.items():
 
             # print("\nCombined Integrated prob to detect model (E=%s, n=%s, theta_obs=%s)" % model_param_tuple)
             # print("\t%s" % prob)

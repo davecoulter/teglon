@@ -18,12 +18,13 @@ from scipy.integrate import simps, quad
 from scipy.interpolate import interp2d
 
 from astropy.table import Table
-
+from matplotlib.lines import Line2D
+from collections import OrderedDict
 
 
 
 # results_table = Table.read("../Events/S190814bv/Models/Detection_Results.prob", format='ascii.ecsv')
-results_table = Table.read("../Events/S190425z/Models/Detection_Results.prob", format='ascii.ecsv')
+results_table = Table.read("../Events/S190425z/ModelDetection/Detection_Results.prob", format='ascii.ecsv')
 
 models = np.asarray(results_table['Model'])
 masses = np.asarray(results_table['Mass'])
@@ -78,7 +79,7 @@ norm = colors.Normalize(min_prob, max_prob)
 #     min_prob = 1e-18
 # norm = colors.LogNorm(min_prob, max_prob)
 
-fig = plt.figure(figsize=(6,6), dpi=1000)
+fig = plt.figure(figsize=(7,7), dpi=1000)
 ax = fig.add_subplot(111)
 
 max_model = {}
@@ -86,17 +87,46 @@ for mt in model_tuples:
     # local_frac = mt[2]/max_prob
     # clr = plt.cm.viridis(norm(local_frac))
     # clr = plt.cm.viridis(norm(mt[2]))
-    key = (mt[0], mt[1])
+
+    # key = (mt[0], mt[1]) # mass vs xlans
+    key = (mt[3], mt[1]) # velocity vs xlans
     if key not in max_model:
-        max_model[key] = (mt[2], mt[3])
+        # max_model[key] = (mt[2], mt[3]) # prob and velocity
+        max_model[key] = (mt[2], mt[0]) # prob and mass
     else:
         if mt[2] >= max_model[key][0]:
-            max_model[key] = (mt[2], mt[3])
+            # max_model[key] = (mt[2], mt[3]) # prob and velocity
+            max_model[key] = (mt[2], mt[0])  # prob and mass
+
+
+markers = OrderedDict()
+markers[0.020] = ("p", 17)
+markers[0.025] = ("H", 17)
+markers[0.030] = ("D", 14)
+markers[0.035] = ("^", 16)
+markers[0.040] = ("o", 16)
+legend_elements = []
+
+for key,value in markers.items():
+    legend_elements.append(Line2D([0],
+                                  [0],
+                                  linestyle='None',
+                                  marker=value[0],
+                                  markerfacecolor="None",
+                                  markeredgecolor="k",
+                                  markersize=value[1],
+                                  label=r"%0.3f $\mathrm{M_{\odot}}$" % key))
+
 
 for key, value in max_model.items():
     clr = plt.cm.viridis(norm(value[0]))
-    ax.plot(key[0], key[1], '.', color=clr, markersize=20) # , alpha=0.25
-    ax.annotate("%0.2fc" % value[1], xy=(key[0], key[1]), xytext=(key[0], key[1]))
+
+    # velocity vs xlans...
+    ax.plot(key[0], key[1], markers[value[1]][0], color=clr, markersize=markers[value[1]][1]) # , alpha=0.25
+
+    # ax.annotate("%0.3fc" % value[1], xy=(key[0], key[1]), xytext=(key[0], key[1])) # annotate velocity
+    # ax.annotate(("%0.3f" % value[1]) + r"$\mathrm{M_{\odot}}$", xy=(key[0], key[1]), xytext=(key[0], key[1]), fontsize=8.0) # annotate mass
+    # ax.annotate(r"%0.3f $\mathrm{M_{\odot}}$" % value[1], xy=(key[0]-0.018, key[1]*1.4), fontsize=8.0)  # annotate mass
 
 sm = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.viridis)
 sm.set_array([]) # can be an empty list
@@ -118,14 +148,20 @@ cb.ax.locator_params(nbins=5)
 # ax.yaxis.set_tick_params(width=2.0)
 # ax.set_yticks([1.0e-09, 1.0e-05, 1.0e-04, 1.0e-03, 1.0e-02, 1.0e-01])
 # ax.set_xticks([0.025, 0.03, 0.035, 0.04])
+
 ax.set_yscale('log')
 
 # ax.annotate(r'$\mathrm{v_{ejecta}}$=%s', xy=(0.6, 0.9), xycoords='axes fraction', fontsize=12)
+# ax.set_xlim([0, 0.45])
+# ax.set_ylim([1e-10, 1.0])
 
-plt.xlabel(r'$\mathrm{Mass_{\odot}}$',fontsize=16)
+
+ax.legend(handles=legend_elements, numpoints=1, fontsize=14) # labelspacing=2.0, , loc="upper right"
+# plt.xlabel(r'$\mathrm{Mass_{\odot}}$',fontsize=16)
+plt.xlabel(r'$\mathrm{v_{ejecta}/c}$',fontsize=16)
 plt.ylabel(r'$\mathrm{\chi_{lanthanide}}$',fontsize=16)
 
 # fig.savefig('Prob2Detect_all.png', bbox_inches='tight')
-fig.savefig('S190425z_Prob2Detect_all.png', bbox_inches='tight')
+fig.savefig('S190425z_Prob2Detect_KNe_v_vs_Xlans.png', bbox_inches='tight')
 plt.close('all')
 print("... Done.")

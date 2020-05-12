@@ -500,17 +500,34 @@ class Teglon:
             csvreader = csv.reader(csvfile, delimiter=' ', skipinitialspace=True)
             for row in csvreader:
 
+                # For Charlie Got Damn it
                 file_name = row[0]
                 field_name = row[1]
                 ra = float(row[2])
                 dec = float(row[3])
-                exp_time = float(row[4])
-                mjd = float(row[5])
-                band = row[6].strip()
+                mjd = float(row[4])
+
+                band = row[5].strip()
+                exp_time = float(row[6])
+                # mag_lim = float(row[7])
+                mag_lim = None
+
+
+                # file_name = row[0]
+                # field_name = row[1]
+                # ra = float(row[2])
+                # dec = float(row[3])
+                # mjd = float(row[4])
+                # band = row[5].strip()
+                # exp_time = float(row[6])
+
+                # exp_time = float(row[4])
+                # mjd = float(row[5])
+                # band = row[6].strip()
 
                 # For ANDICAM, the filter is in the filename...
-                if self.options.tele == "a" and band == "___":
-                    band = file_name.split(".")[1]
+                # if self.options.tele == "a" and band == "___":
+                #     band = file_name.split(".")[1]
 
                 # # KAIT data format
                 # ra = float(row[2])
@@ -525,13 +542,13 @@ class Teglon:
                 #         exp_time = None
                 # except:
                 #     pass
-                #
 
-                mag_lim = None
-                try:
-                    mag_lim = float(row[7])
-                except:
-                    pass
+
+                # mag_lim = None
+                # try:
+                #     mag_lim = float(row[7])
+                # except:
+                #     pass
 
                 # Get Band_id
                 band_map = band_mapping[band]

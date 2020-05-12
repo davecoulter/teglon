@@ -114,27 +114,7 @@ z_new = _2d_func(model_X_input, model_Y_input)
 
 
 
-# transient_colors = {
-#     "Ia":"orangered",
-#     "Ia-91bg":"white",
-#     "II":"forestgreen",
-#     "Ia-91T":"black",
-#     "SLSN-I":"mediumturquoise",
-#     "IIb":"orange",
-#     "Ic":"grey",
-#     "Ib":"orchid",
-#     "IIn":"cornflowerblue"
-# }
-# transients = []
-# with open('dm7_i_all_transients.txt') as csv_file:
-#     csv_reader = csv.reader(csv_file, delimiter=' ')
-#     next(csv_reader)
-#     for row in csv_reader:
-#         transient_type = row[0]
-#         dm7 = float(row[1])
-#         abs_peak = float(row[2])
-#
-#         transients.append((abs_peak, dm7/7.0, transient_colors[transient_type], transient_type))
+
 
 
 min_prob = np.min(z_new)
@@ -149,11 +129,20 @@ ax = fig.add_subplot(111)
 ax.invert_yaxis()
 
 # 0814 contours
-manual_locations = [(10.0, -17.0), (8.0, -20.0), (5.0, -21.0), (3.0, -21), (0.0, -22.0)]
 ax.contourf(xx, yy, z_new, levels=np.linspace(0.0, max_prob, 200), cmap=plt.cm.viridis)
 
 CS = ax.contour(xx, yy, z_new, levels=[0.0, 0.10, 0.30, 0.5, 0.7, 0.9, max_prob], colors="red")
+
+# For Zoom out
+manual_locations = [(10.0, -17.0), (8.0, -20.0), (5.0, -21.0), (3.0, -21), (0.0, -22.0)]
 ax.clabel(CS, inline=1, fontsize=24, manual=manual_locations, fmt="%0.1f")
+
+# For Zoom in
+# ax.text(7e-3, -16.05, "0.9", fontsize=24, color="red")
+# ax.text(9e-3, -15.4, "0.7", fontsize=24, color="red")
+# ax.text(5e-2, -15.45, "0.5", fontsize=24, color="red", rotation=35)
+# ax.text(8.6e-2, -15.4, "0.3", fontsize=24, color="red", rotation=55)
+# ax.text(1.9e-1, -15.8, "0.1", fontsize=24, color="red", rotation=55)
 
 # for i in range(5):
 #     p = CS.collections[i].get_paths()[1]
@@ -211,6 +200,30 @@ ax.clabel(CS, inline=1, fontsize=24, manual=manual_locations, fmt="%0.1f")
 #     # ax.plot(model_x, model_y, 'k-', zorder=9999, linewidth=1.0)
 #     ax.plot(xxx,yyy,'r', linewidth=3.0) #zorder=9999,
 
+# These transients are only for the zoom in
+# transient_colors = {
+#     "Ia":"orangered",
+#     "Ia-91bg":"darkblue",
+#     "II":"forestgreen",
+#     "Ia-91T":"black",
+#     "SLSN-I":"mediumturquoise",
+#     "IIb":"orange",
+#     "Ic":"grey",
+#     "Ib":"orchid",
+#     "IIn":"cornflowerblue"
+# }
+#
+# transients = []
+# with open('dm7_i_all_transients.txt') as csv_file:
+#     csv_reader = csv.reader(csv_file, delimiter=' ')
+#     next(csv_reader)
+#     for row in csv_reader:
+#         transient_type = row[0]
+#         dm7 = float(row[1])
+#         abs_peak = float(row[2])
+#
+#         transients.append((abs_peak, dm7/7.0, transient_colors[transient_type], transient_type))
+#
 # transient_legend = {
 #     "Ia":False,
 #     "Ia-91bg":False,
@@ -225,9 +238,9 @@ ax.clabel(CS, inline=1, fontsize=24, manual=manual_locations, fmt="%0.1f")
 # for t in transients:
 #     if not transient_legend[t[3]]:
 #         transient_legend[t[3]] = True
-#         ax.plot(t[1], t[0], "*", markerfacecolor=t[2], markeredgecolor="None", markersize=12, alpha=0.75, label=t[3])
+#         ax.plot(t[1], t[0], "*", markerfacecolor=t[2], markeredgecolor=t[2], markersize=20, alpha=1.0, label=t[3])
 #     else:
-#         ax.plot(t[1], t[0], "*", markerfacecolor=t[2], markeredgecolor="None", markersize=12, alpha=0.75)
+#         ax.plot(t[1], t[0], "*", markerfacecolor=t[2], markeredgecolor=t[2], markersize=20, alpha=1.0)
 
 sm = plt.cm.ScalarMappable(norm=norm, cmap=plt.cm.viridis)
 sm.set_array([]) # can be an empty list
@@ -247,6 +260,7 @@ cb.ax.locator_params(nbins=5)
 # dm7 = 0.56
 # Mabs = -16.56
 ax.plot(0.56, -16.56, '*', color='yellow', markeredgecolor='yellow', markersize=24) #markeredgecolor="black" , alpha=0.25
+print("Prob of SSS17a: %s" % _2d_func(0.56, -16.56))
 
 # ax.annotate('0.9', xy=(0.4, -18.1), fontsize=24, color='red')
 # ax.annotate('0.7', xy=(0.4, -17.4), fontsize=24, color='red')
@@ -261,9 +275,19 @@ ax.plot(0.56, -16.56, '*', color='yellow', markeredgecolor='yellow', markersize=
 
 ax.tick_params(axis='both', which='major', labelsize=24)
 
-plt.xlabel(r'$\Delta$M $\mathrm{day^{-1}}$',fontsize=32)
-plt.ylabel(r'$\mathrm{M_{0}}$',fontsize=32)
+# # These limits and legend are only for the zoom in
+# ax.set_ylim([-15, -20])
+# ax.set_xlim([3e-3, 7e-1])
+# ax.set_xscale('log')
+# ax.legend(loc="upper right", fontsize=18, borderpad=0.35, handletextpad=0.0, labelspacing=0.4, framealpha=1.0)
+
+plt.xlabel(r'$\Delta$M [mag $\mathrm{day^{-1}}$]',fontsize=32)
+plt.ylabel(r'$\mathrm{M_{0}}$ [mag]',fontsize=32)
+
+# Only for zoom-in
+# plt.ylabel(r'$\mathrm{M_{peak}}$ [mag]',fontsize=32)
 
 fig.savefig('190814_Linear_Prob2Detect_all.png', bbox_inches='tight')
+# fig.savefig('190814_Linear_Prob2Detect_all_Zoom.png', bbox_inches='tight')
 plt.close('all')
 print("... Done.")

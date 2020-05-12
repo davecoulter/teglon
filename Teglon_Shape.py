@@ -60,7 +60,9 @@ class Telgon_Shape(metaclass=ABCMeta):
     def create_query_polygon(self, initial_poly_in_radian=True):
 
         query_polygon = []
-        tolerance = self.radius_proxy/360.0
+        tolerance = 1.41/360 # based on Swope's radius proxy
+        if self.radius_proxy:
+            tolerance = self.radius_proxy/360.0
 
         for poly in self.polygon:
 
@@ -161,7 +163,7 @@ class Telgon_Shape(metaclass=ABCMeta):
                             else:
                                 west = geometry.Polygon(Telgon_Shape.get_coord_tuple(split_poly_ra,dec_deg))
 
-                        query_polygon += [east,west]
+                        query_polygon += [east, west]
                     else:
                         query_polygon += split_poly_collection
 

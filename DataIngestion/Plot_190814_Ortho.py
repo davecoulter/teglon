@@ -330,7 +330,7 @@ class Teglon:
 
     def main(self):
 
-        is_error = False
+        is_error = True
         has_candidates = False
 
         # Parameter checks
@@ -476,7 +476,7 @@ class Teglon:
                         hp_prob.N128_SkyPixel_id 
                     ) running_prob 
             WHERE 
-                running_prob.cum_prob <= 0.9 
+                running_prob.cum_prob <= 0.90 
         '''
 
         print("Selecting map pixels...")
@@ -515,52 +515,52 @@ class Teglon:
                 break
         print("... %s" % index_90th)
 
-        # print("Build multipolygons...")
-        # net_50_polygon = []
-        # for p in map_pix_sorted[0:index_50th]:
-        # 	net_50_polygon += p.query_polygon
-        # joined_50_poly = unary_union(net_50_polygon)
+        print("Build multipolygons...")
+        net_50_polygon = []
+        for p in map_pix_sorted[0:index_50th]:
+            net_50_polygon += p.query_polygon
+        joined_50_poly = unary_union(net_50_polygon)
 
-        # # Fix any seams
-        # eps = 0.00001
-        # merged_50_poly = []
-        # smoothed_50_poly = joined_50_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+        # Fix any seams
+        eps = 0.00001
+        merged_50_poly = []
+        smoothed_50_poly = joined_50_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
 
-        # try:
-        # 	test_iter = iter(smoothed_50_poly)
-        # 	merged_50_poly = smoothed_50_poly
-        # except TypeError as te:
-        # 	merged_50_poly.append(smoothed_50_poly)
+        try:
+            test_iter = iter(smoothed_50_poly)
+            merged_50_poly = smoothed_50_poly
+        except TypeError as te:
+            merged_50_poly.append(smoothed_50_poly)
 
-        # print("Number of sub-polygons in `merged_50_poly`: %s" % len(merged_50_poly))
-        # sql_50_poly = SQL_Polygon(merged_50_poly, detectors[0])
+        print("Number of sub-polygons in `merged_50_poly`: %s" % len(merged_50_poly))
+        sql_50_poly = SQL_Polygon(merged_50_poly, detectors[0])
 
-        # net_90_polygon = []
-        # for p in map_pix_sorted[0:index_90th]:
-        # 	net_90_polygon += p.query_polygon
-        # joined_90_poly = unary_union(net_90_polygon)
+        net_90_polygon = []
+        for p in map_pix_sorted[0:index_90th]:
+            net_90_polygon += p.query_polygon
+        joined_90_poly = unary_union(net_90_polygon)
 
-        # # Fix any seams
-        # merged_90_poly = []
-        # smoothed_90_poly = joined_90_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+        # Fix any seams
+        merged_90_poly = []
+        smoothed_90_poly = joined_90_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
 
-        # try:
-        # 	test_iter = iter(smoothed_90_poly)
-        # 	merged_90_poly = smoothed_90_poly
-        # except TypeError as te:
-        # 	merged_90_poly.append(smoothed_90_poly)
+        try:
+            test_iter = iter(smoothed_90_poly)
+            merged_90_poly = smoothed_90_poly
+        except TypeError as te:
+            merged_90_poly.append(smoothed_90_poly)
 
-        # print("Number of sub-polygons in `merged_90_poly`: %s" % len(merged_90_poly))
-        # sql_90_poly = SQL_Polygon(merged_90_poly, detectors[0])
-        # print("... done.")
+        print("Number of sub-polygons in `merged_90_poly`: %s" % len(merged_90_poly))
+        sql_90_poly = SQL_Polygon(merged_90_poly, detectors[0])
+        print("... done.")
 
-        sql_50_poly = None
-        with open('sql50.pkl', 'rb') as handle:
-            sql_50_poly = pickle.load(handle)
-
-        sql_90_poly = None
-        with open('sql90.pkl', 'rb') as handle:
-            sql_90_poly = pickle.load(handle)
+        # sql_50_poly = None
+        # with open('sql50.pkl', 'rb') as handle:
+        #     sql_50_poly = pickle.load(handle)
+        #
+        # sql_90_poly = None
+        # with open('sql90.pkl', 'rb') as handle:
+        #     sql_90_poly = pickle.load(handle)
 
         fig = plt.figure(figsize=(10, 10), dpi=1000)
         ax = fig.add_subplot(111)

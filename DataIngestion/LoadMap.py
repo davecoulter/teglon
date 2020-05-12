@@ -478,6 +478,7 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
                 distnorm = rescaled_distnorm
                 map_nside = rescaled_map_nside
             else:
+                print("##### Loading ORIGINAL RESOLUTION MAP @ NSIDE = %s #####" % orig_map_nside)
                 prob = orig_prob
                 distmu = orig_distmu
                 distsigma = orig_distsigma
@@ -629,6 +630,8 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
                 distnorm = rescaled_distnorm
                 map_nside = rescaled_map_nside
             else:
+                print("##### Loading ORIGINAL RESOLUTION MAP @ NSIDE = %s #####" % orig_map_nside)
+
                 prob = orig_prob
                 distmu = orig_distmu
                 distsigma = orig_distsigma

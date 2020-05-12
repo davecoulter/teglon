@@ -14,7 +14,7 @@ from Teglon_Shape import *
 
 
 class Pixel_Element(Telgon_Shape):
-    def __init__(self, index, nside, prob, pixel_id=None):
+    def __init__(self, index, nside, prob, pixel_id=None, mean_dist=None, stddev_dist=None):
 
         self.tile_references = []
 
@@ -36,6 +36,9 @@ class Pixel_Element(Telgon_Shape):
         # For all NSIDE < self.nside:
         # { NSIDE: Containing Pixel Index }
         self.parent_pixel = None
+
+        self.mean_dist = mean_dist
+        self.stddev_dist = stddev_dist
 
     def __str__(self):
         return str(self.__dict__)

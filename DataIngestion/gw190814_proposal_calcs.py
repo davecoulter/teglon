@@ -82,6 +82,7 @@ import json
 
 import MySQLdb as my
 from scipy.stats import pearsonr
+
 # endregion
 
 # region config
@@ -105,6 +106,8 @@ db_host = db_config.get('database', 'DATABASE_HOST')
 db_port = db_config.get('database', 'DATABASE_PORT')
 
 isDEBUG = False
+
+
 # endregion
 
 # region db CRUD
@@ -155,7 +158,7 @@ def query_db(query_list, commit=False):
                 size_in_mb = sys.getsizeof(streamed_results) / 1.0e+6
 
                 print("\t\tfetched: %s; current length: %s; running size: %0.3f MB" % (
-                count, len(streamed_results), size_in_mb))
+                    count, len(streamed_results), size_in_mb))
 
                 if not r or count < chunk_size:
                     break
@@ -304,6 +307,7 @@ def batch_insert(insert_statement, insert_data, batch_size=50000):
     print("batch_insert execution time: %s" % (_tend - _tstart))
     print("********* end DEBUG ***********\n")
 
+
 # endregion
 
 start = time.time()
@@ -311,32 +315,35 @@ start = time.time()
 flag_good_galaxies = False
 reset_flag_good_galaxies = False
 plot_demographics = False
-plot_completeness = False
+plot_completeness = True
 plot_2D_histogram = False
 
 create_2dF_static_grid = False
 insert_2dF_static_grid = create_2dF_static_grid and False
-create_tile_pixel_relations = True
+create_tile_pixel_relations = False
 
 plot_localization = False
 load_ozDES = False
 plot_ozDES = False
 
-
 map_nside = 1024
 
 h = 0.7
-phi = 1.6e-2*h**3              # +/- 0.3 Mpc^-3
-a = -1.07                       # +/- 0.07
-L_B_star = 1.2e+10/h**2         # +/- 0.1
-cosmo = LambdaCDM(H0=100*h, Om0=0.27, Ode0=0.73)
+phi = 1.6e-2 * h ** 3  # +/- 0.3 Mpc^-3
+a = -1.07  # +/- 0.07
+L_B_star = 1.2e+10 / h ** 2  # +/- 0.1
+cosmo = LambdaCDM(H0=100 * h, Om0=0.27, Ode0=0.73)
 cosmo_high = LambdaCDM(H0=20.0, Om0=0.27, Ode0=0.73)
 cosmo_low = LambdaCDM(H0=140.0, Om0=0.27, Ode0=0.73)
 
 path_format = "{}/{}"
 ps1_strm_dir = "../PS1_DR2_QueryData/PS1_STRM"
+
+# region
+
 northern_95th_pixel_ids = path_format.format(ps1_strm_dir, "northern_95th_pixel_ids.txt")
 southern_95th_pixel_ids = path_format.format(ps1_strm_dir, "southern_95th_pixel_ids.txt")
+_50th_pixel_id_file = path_format.format(ps1_strm_dir, "50th_pixel_ids.txt")
 
 # region Load pixel_ids from file...
 pixel_select = '''
@@ -379,7 +386,23 @@ with open(southern_95th_pixel_ids, 'r') as csvfile:
 pixel_result_south = query_db([pixel_select % ",".join(southern_pixel_ids)])[0]
 print("Total NSIDE=1024 pixels in Southern 95th: %s" % len(pixel_result_south))
 
+_50th_pixel_ids = []
+with open(_50th_pixel_id_file, 'r') as csvfile:
+    csvreader = csv.reader(csvfile, delimiter=',', skipinitialspace=True)
+    next(csvreader)  # skip header
+
+    for row in csvreader:
+        id = row[0]
+        _50th_pixel_ids.append(id)
+
+pixel_result_50 = query_db([pixel_select % ",".join(_50th_pixel_ids)])[0]
+print("Total NSIDE=1024 pixels in 50th: %s" % len(pixel_result_50))
+
+
 map_pix_north = []
+map_pix_north_dict = {}
+map_pix_50_dict = {}
+
 map_pix_south = []
 all_map_pix = []
 for m in pixel_result_north:
@@ -391,6 +414,18 @@ for m in pixel_result_north:
     p = Pixel_Element(index, map_nside, prob, pixel_id=pix_id, mean_dist=dist, stddev_dist=stddev)
     map_pix_north.append(p)
     all_map_pix.append(p)
+    map_pix_north_dict[index] = p
+
+
+for m in pixel_result_50:
+    pix_id = int(m[0])
+    index = int(m[2])
+    prob = float(m[3])
+    dist = float(m[7])
+    stddev = float(m[8])
+    p = Pixel_Element(index, map_nside, prob, pixel_id=pix_id, mean_dist=dist, stddev_dist=stddev)
+
+    map_pix_50_dict[index] = p
 
 for m in pixel_result_south:
     pix_id = int(m[0])
@@ -408,13 +443,13 @@ all_map_pix = sorted(all_map_pix, key=lambda x: x.prob, reverse=True)
 
 # region Compute Volume Information for the North where we have PS1 information
 map_pix_dist = np.asarray([mp.mean_dist for mp in map_pix_north])
-map_pix_dist_far = np.asarray([mp.mean_dist+2.0*mp.stddev_dist for mp in map_pix_north])
-map_pix_dist_near = np.asarray([mp.mean_dist-2.0*mp.stddev_dist for mp in map_pix_north])
+map_pix_dist_far = np.asarray([mp.mean_dist + 2.0 * mp.stddev_dist for mp in map_pix_north])
+map_pix_dist_near = np.asarray([mp.mean_dist - 2.0 * mp.stddev_dist for mp in map_pix_north])
 
 map_pix_z_limits = {}
 for mp in map_pix_north:
-    max_dist = mp.mean_dist+2.0*mp.stddev_dist
-    min_dist = mp.mean_dist-2.0*mp.stddev_dist
+    max_dist = mp.mean_dist + 2.0 * mp.stddev_dist
+    min_dist = mp.mean_dist - 2.0 * mp.stddev_dist
 
     # Stretch range with cosmologies with H0 ranging from 20 to 140...
     min_z = z_at_value(cosmo_high.luminosity_distance, min_dist * u.Mpc)
@@ -423,17 +458,24 @@ for mp in map_pix_north:
     if mp.id not in map_pix_z_limits:
         map_pix_z_limits[mp.id] = (min_z, max_z, min_dist, max_dist)
 
-dist_grid = np.logspace(np.log10(min(map_pix_dist_near)-5.0), np.log10(max(map_pix_dist_far)+5.0), 1000)
+dist_grid = np.logspace(np.log10(min(map_pix_dist_near) - 5.0), np.log10(max(map_pix_dist_far) + 5.0), 1000)
 z_grid = [z_at_value(cosmo.luminosity_distance, d * u.Mpc) for d in dist_grid]
 z_model = interp1d(dist_grid, z_grid)
 z_near = z_model(map_pix_dist_near)
 z_far = z_model(map_pix_dist_far)
 print("Min z: %0.4f; Max z: %0.4f" % (min(z_near), max(z_far)))
 
+# Figure completeness wrt "nominal" H0 of 70
 # volume_far = cosmo.comoving_volume(z_far)
 # volume_min = cosmo.comoving_volume(z_near)
-volume_far = cosmo_high.comoving_volume(z_far)
-volume_min = cosmo_low.comoving_volume(z_near)
+
+# Figure completeness wrt "nominal" H0 of 70, but out to z=0.2
+volume_far = cosmo.comoving_volume(0.2)
+volume_min = cosmo.comoving_volume(z_near)
+
+# Figure completeness wrt "stretched" H0 of [20, 140]
+# volume_far = cosmo_high.comoving_volume(z_far)
+# volume_min = cosmo_low.comoving_volume(z_near)
 
 sky_fraction_per_pix = (1.0 / hp.nside2npix(map_nside))
 d_volume = (volume_far - volume_min) * sky_fraction_per_pix
@@ -453,7 +495,7 @@ with open(Unique_PS1_Galaxies_Northern_95th, 'r') as csvfile:
         gaia_ra = float(row[1])
         gaia_dec = float(row[2])
         synth_B1 = float(row[3])
-        synth_B2  = float(row[4])
+        synth_B2 = float(row[4])
         z_phot0 = float(row[5])
         z_photErr = float(row[6])
         ps1_hp_id = int(row[7])
@@ -473,13 +515,15 @@ with open(Unique_PS1_Galaxies_Northern_95th, 'r') as csvfile:
 
         # Only let things through in the z +/- z_err that fall in the range, and that have physical synth B vals...
         if (z_phot0 > 0.0) and \
-            (z_phot0 + z_photErr) >= z_min and \
-            (z_phot0 - z_photErr) <= z_max and \
-            synth_B2 > 0:
+                (z_phot0 + z_photErr) >= z_min and \
+                (z_phot0 - z_photErr) <= z_max and \
+                synth_B2 > 0:
 
             PS1_z_dist = cosmo.luminosity_distance(z_phot0).value
-            ps1_galaxies.append((ps1_galaxy_id, gaia_ra, gaia_dec, synth_B1, synth_B2, z_phot0, z_photErr, PS1_z_dist,
-                                 ps1_hp_id, N128_SkyPixel_id, prob_Galaxy, kron_g, kron_r, kron_i, kron_z, kron_y))
+            pg = (ps1_galaxy_id, gaia_ra, gaia_dec, synth_B1, synth_B2, z_phot0, z_photErr, PS1_z_dist,
+                                 ps1_hp_id, N128_SkyPixel_id, prob_Galaxy, kron_g, kron_r, kron_i, kron_z, kron_y)
+            ps1_galaxies.append(pg)
+
 print("Total PS1 galaxies within northern 95th, within z-range: %s" % len(ps1_galaxies))
 
 zs = [p[5] for p in ps1_galaxies]
@@ -502,6 +546,37 @@ for i in range(len(prob_Gal)):
     if p >= 0.9 and r <= 22.0:
         count += 1
 print("Number of galaxies with prob_Galaxy >= 0.9 AND kron R < 22.0: %s" % count)
+
+
+two_cuts_r = []
+two_cuts_r_50th = []
+two_cuts_r_95th = []
+for i in range(len(prob_Gal)):
+    p = prob_Gal[i]
+    r = r_kron_mags[i]
+    z = zs[i]
+
+    if p >= 0.9 and z <= 0.2:
+
+        two_cuts_r.append(r)
+
+        gal = ps1_galaxies[i]
+        ra = gal[1]
+        dec = gal[2]
+        c = coord.SkyCoord(ra,dec, unit=(u.deg, u.deg))
+        index = hp.ang2pix(1024, 0.5 * np.pi - c.dec.radian, c.ra.radian)
+
+        if index in map_pix_north_dict:
+            two_cuts_r_95th.append(gal)
+
+        if index in map_pix_50_dict:
+            two_cuts_r_50th.append(gal)
+
+
+print("Number of galaxies with prob_Galaxy >= 0.9 AND z <= 0.2: %s" % len(two_cuts_r))
+print("Number of galaxies in `two_cuts_r_95th`: %s" % len(two_cuts_r_95th))
+print("Number of galaxies in `two_cuts_r_50th`: %s" % len(two_cuts_r_50th))
+
 
 all_cuts_p = []
 all_cuts_r = []
@@ -543,6 +618,7 @@ with open(Galaxies_That_Made_All_Cuts, 'w') as csvfile:
     for row in photo_z_result:
         csvwriter.writerow(row)
 
+
 if flag_good_galaxies:
     update_galaxies = '''
         UPDATE PS1_Galaxy SET GoodCandidate = 1 WHERE id IN (%s) 
@@ -581,6 +657,7 @@ osDES_keylist = [
 ]
 
 ozDES_data = OrderedDict()
+ozDES_models = OrderedDict()
 if load_ozDES:
 
     # Load all datasets
@@ -597,23 +674,89 @@ if load_ozDES:
 
             for row in csvreader:
                 exp_time = float(row[0])
-                z_complete = float(row[1])/100.
+                success = float(row[1]) / 100.
 
                 ozDES_data[key[0]][key[1]][0].append(exp_time)
-                ozDES_data[key[0]][key[1]][1].append(z_complete)
+                ozDES_data[key[0]][key[1]][1].append(success)
 
+            exp_times = ozDES_data[key[0]][key[1]][0]
+            successes = ozDES_data[key[0]][key[1]][1]
+
+            # Assume it stays linear to min exp time. Get slope of first two points...
+            m = (successes[1] - successes[0]) / (exp_times[1] - exp_times[0])
+            y_0 = successes[0] - m * exp_times[0]
+            model = interp1d([0] + exp_times, [y_0] + successes)
+
+            if key[0] not in ozDES_models:
+                ozDES_models[key[0]] = OrderedDict()
+
+            ozDES_models[key[0]][key[1]] = model
+
+if plot_ozDES:
+
+    fig = plt.figure(figsize=(8, 6), dpi=800)
+    ax1 = fig.add_subplot(111)
+
+    model_time = np.linspace(40, 300, 500)
+    for key in osDES_keylist:
+
+        if key[1] == Q4:
+            continue
+
+        model = ozDES_models[key[0]][key[1]]
+        exp_time = ozDES_data[key[0]][key[1]][0]
+        success = np.asarray(ozDES_data[key[0]][key[1]][1]) * 100.0
+
+        # find time to >= 80%
+        model_success = model(model_time)
+        thresh = 0.75
+        thresh_txt = thresh * 100
+        time_for_bin_to_thresh_success = next(model_time[i] for i, s in enumerate(model_success) if s >= thresh)
+
+        addendum = ""
+        if key[0] == _20_0_20_5:
+            pass
+        elif key[0] == _20_5_21_0:
+            addendum += "; 80 min => %0.0f%%" % float(model(80.0) * 100.0)
+        elif key[0] == _21_0_21_5:
+            addendum += "; 120 min => %0.0f%%" % float(model(120.0) * 100.0)
+        elif key[0] == _21_5_22_0:
+            addendum += "; 160 min => %0.0f%%" % float(model(160.0) * 100.0)
+
+        # Plot data
+        if key[4] != "":
+            lbl = key[4] + "; %0.0f min => %0.0f%%" % (time_for_bin_to_thresh_success, thresh_txt) + addendum
+            ax1.plot(exp_time, success, color=key[2], linestyle=key[3], label=lbl, alpha=1.0)
+        else:
+            ax1.plot(exp_time, success, color=key[2], linestyle=key[3], alpha=1.0)
+
+        # plot model -- only good until 250 seconds
+        ax1.plot(model_time, model_success * 100, color=key[2], linestyle='--', alpha=0.3)
+
+    ax1.vlines(40.0, 30, 103, colors='k', linestyles='--', label="Min ExpTime: 40 min")
+
+    ax1.set_xlim([0, 1600])
+    ax1.set_ylim([30, 103])
+    ax1.set_xlabel("Exposure time (minutes)")
+    ax1.set_ylabel("Redshift Completeness (%)")
+    ax1.legend(loc="lower right", mode='expand', labelspacing=2.0, bbox_to_anchor=(0.35, 0., 0.65, 0.5))
+    fig.savefig(path_format.format(ps1_strm_dir, "OzDES_Fig5.png"), bbox_inches='tight')
+    plt.close('all')
 
 # Group PS1 candidates by bin
 ps1_galaxies_by_mag_bin = OrderedDict()
-ps1_galaxies_by_mag_bin[_14_0_20_0] = ([], "blue")
-ps1_galaxies_by_mag_bin[_20_0_20_5] = ([], "orange")
-ps1_galaxies_by_mag_bin[_20_5_21_0] = ([], "red")
-ps1_galaxies_by_mag_bin[_21_0_21_5] = ([], "green")
-ps1_galaxies_by_mag_bin[_21_5_22_0] = ([], "black")
+# ps1_galaxies_by_mag_bin[_14_0_20_0] = ([], "blue")
+# ps1_galaxies_by_mag_bin[_20_0_20_5] = ([], "orange")
+# ps1_galaxies_by_mag_bin[_20_5_21_0] = ([], "red")
+# ps1_galaxies_by_mag_bin[_21_0_21_5] = ([], "green")
+# ps1_galaxies_by_mag_bin[_21_5_22_0] = ([], "black")
+ps1_galaxies_by_mag_bin[_14_0_20_0] = ([], "red")
+ps1_galaxies_by_mag_bin[_20_0_20_5] = ([], "red")
 
+ps1_galaxies_by_mag_bin[_20_5_21_0] = ([], "green")
+ps1_galaxies_by_mag_bin[_21_0_21_5] = ([], "blue")
+ps1_galaxies_by_mag_bin[_21_5_22_0] = ([], "blue")
 
-# ps1_galaxies.append((ps1_galaxy_id, gaia_ra, gaia_dec, synth_B1, synth_B2, z_phot0, z_photErr, PS1_z_dist,
-#                                  ps1_hp_id, N128_SkyPixel_id, prob_Galaxy, kron_g, kron_r, kron_i, kron_z, kron_y))
 for g in all_cuts_PS1_galaxies:
     r = g[12]
     if r < 20.0:
@@ -627,44 +770,131 @@ for g in all_cuts_PS1_galaxies:
     elif r >= 21.5:
         ps1_galaxies_by_mag_bin[_21_5_22_0][0].append(g)
 
-frac_lt_20 = len(ps1_galaxies_by_mag_bin[_14_0_20_0][0])/len(all_cuts_PS1_galaxies)
+frac_lt_20 = len(ps1_galaxies_by_mag_bin[_14_0_20_0][0]) / len(all_cuts_PS1_galaxies)
 print("Percentage < 20 mag: %0.3f" % frac_lt_20)
 
-frac_20_0_20_5 = len(ps1_galaxies_by_mag_bin[_20_0_20_5][0])/len(all_cuts_PS1_galaxies)
+frac_20_0_20_5 = len(ps1_galaxies_by_mag_bin[_20_0_20_5][0]) / len(all_cuts_PS1_galaxies)
 print("Percentage > 20 and < 20.5 mag: %0.3f" % frac_20_0_20_5)
 
-frac_20_5_21_0 = len(ps1_galaxies_by_mag_bin[_20_5_21_0][0])/len(all_cuts_PS1_galaxies)
+frac_20_5_21_0 = len(ps1_galaxies_by_mag_bin[_20_5_21_0][0]) / len(all_cuts_PS1_galaxies)
 print("Percentage > 20.5 and < 21.0 mag: %0.3f" % frac_20_5_21_0)
 
-frac_21_0_21_5 = len(ps1_galaxies_by_mag_bin[_21_0_21_5][0])/len(all_cuts_PS1_galaxies)
+frac_21_0_21_5 = len(ps1_galaxies_by_mag_bin[_21_0_21_5][0]) / len(all_cuts_PS1_galaxies)
 print("Percentage > 21.0 and < 21.5 mag: %0.3f" % frac_21_0_21_5)
 
-frac_gt_21_5 = len(ps1_galaxies_by_mag_bin[_21_5_22_0][0])/len(all_cuts_PS1_galaxies)
+frac_gt_21_5 = len(ps1_galaxies_by_mag_bin[_21_5_22_0][0]) / len(all_cuts_PS1_galaxies)
 print("Percentage > 21.5 mag: %0.3f" % frac_gt_21_5)
 
 # endregion
 
 # region Plots
 if plot_demographics:
-    fig = plt.figure(figsize=(10, 10), dpi=800)
-    ax1 = fig.add_subplot(221)
-    n1, bins1, patches1 = ax1.hist(zs, histtype='step', bins=np.linspace(0, 1, 20), color="black")
-    ax1.set_xlabel("Photo z")
-    ax1.set_ylabel("Count")
+    fig = plt.figure(figsize=(8, 8), dpi=800)
+    # ax1 = fig.add_subplot(221)
+    # n1, bins1, patches1 = ax1.hist(zs, histtype='step', bins=np.linspace(0, 1, 20), color="black")
+    # ax1.set_xlabel("Photo z")
+    # ax1.set_ylabel("Count")
+    #
+    # ax2 = fig.add_subplot(222)
+    # n2, bins2, patches2 = ax2.hist(prob_Gal, histtype='step', bins=np.linspace(0.7, 1, 20), color="dodgerblue")
+    # ax2.set_xlabel("prob_Galaxy")
+    # ax2.set_ylabel("Count")
 
-    ax2 = fig.add_subplot(222)
-    n2, bins2, patches2 = ax2.hist(prob_Gal, histtype='step', bins=np.linspace(0.7, 1, 20), color="dodgerblue")
-    ax2.set_xlabel("prob_Galaxy")
-    ax2.set_ylabel("Count")
+    # ax3 = fig.add_subplot(223)
+    ax3 = fig.add_subplot(111)
 
-    ax3 = fig.add_subplot(223)
-    n3, bins3, patches3 = ax3.hist(r_kron_mags, histtype='step', bins=np.linspace(14, 22, 20), color="red")
-    ax3.set_xlabel("Kron r [mag]")
-    ax3.set_ylabel("Count")
+    left, bottom, width, height = [0.25, 0.6, 0.2, 0.2]
+    ax4 = fig.add_axes([left, bottom, width, height])
 
-    ax1.hist(all_cuts_z, histtype='stepfilled', bins=bins1, color='black')
-    ax2.hist(all_cuts_p, histtype='stepfilled', bins=bins2, color='dodgerblue')
-    ax3.hist(all_cuts_r, histtype='stepfilled', bins=bins3, color='red')
+    # n3, bins3, patches3 = ax3.hist(r_kron_mags, histtype='step', bins=np.linspace(14, 22, 20), color="k")
+
+    # n3, bins3, patches3 = ax3.hist(r_kron_mags, histtype='step', bins=np.linspace(14, 22, 17), color="k")
+    n3, bins3, patches3 = ax3.hist(two_cuts_r, histtype='step', bins=np.linspace(14, 22, 17), color="k")
+    ax3.set_xlabel(r"$\mathrm{r_{kron}}$ [mag]")
+    ax3.set_ylabel("Number of Galaxies")
+
+    # ax1.hist(all_cuts_z, histtype='stepfilled', bins=bins1, color='black')
+    # ax2.hist(all_cuts_p, histtype='stepfilled', bins=bins2, color='dodgerblue')
+    # ax3.hist(all_cuts_r, histtype='stepfilled', bins=bins3, color='red')
+
+    # ps1_galaxies_by_mag_bin[_20_0_20_5] = ([], "red")
+    # ps1_galaxies_by_mag_bin[_20_5_21_0] = ([], "red")
+    # ps1_galaxies_by_mag_bin[_21_0_21_5] = ([], "green")
+    # ps1_galaxies_by_mag_bin[_21_5_22_0] = ([], "blue")
+
+    all_cuts_arr = np.asarray(all_cuts_r)
+
+    bright_i = np.where((all_cuts_arr < 20.5))[0]
+    bright_r = all_cuts_arr[bright_i]
+    ax3.hist(bright_r, histtype='stepfilled', bins=bins3, color='red')
+
+    mid_i = np.where((all_cuts_arr >= 20.5) & (all_cuts_arr < 21.0))[0]
+    mid_r = all_cuts_arr[mid_i]
+    ax3.hist(mid_r, histtype='stepfilled', bins=bins3, color='green')
+
+    dim_i = np.where((all_cuts_arr >= 21.0) & (all_cuts_arr < 22.0))[0]
+    dim_r = all_cuts_arr[dim_i]
+    ax3.hist(dim_r, histtype='stepfilled', bins=bins3, color='blue')
+
+
+    # for key in osDES_keylist:
+    #
+    #     if key[1] == Q4:
+    #         continue
+    #     if key[0] not in [_20_5_21_0, _21_0_21_5, _21_5_22_0]:
+    #         continue
+    #
+    #     model = ozDES_models[key[0]][key[1]]
+    #     exp_time = ozDES_data[key[0]][key[1]][0]
+    #     success = np.asarray(ozDES_data[key[0]][key[1]][1]) * 100.0
+    #
+    #     # find time to >= 80%
+    #     model_success = model(model_time)
+    #     thresh = 0.75
+    #     thresh_txt = thresh * 100
+    #     time_for_bin_to_thresh_success = next(model_time[i] for i, s in enumerate(model_success) if s >= thresh)
+    #
+    #     # addendum = ""
+    #     # if key[0] == _20_0_20_5:
+    #     #     pass
+    #     # elif key[0] == _20_5_21_0:
+    #     #     addendum += "; 80 min => %0.0f%%" % float(model(80.0) * 100.0)
+    #     # elif key[0] == _21_0_21_5:
+    #     #     addendum += "; 120 min => %0.0f%%" % float(model(120.0) * 100.0)
+    #     # elif key[0] == _21_5_22_0:
+    #     #     addendum += "; 160 min => %0.0f%%" % float(model(160.0) * 100.0)
+    #
+    #     # Plot data
+    #     if key[4] != "":
+    #         lbl = key[4] + "; %0.0f min => %0.0f%%" % (time_for_bin_to_thresh_success, thresh_txt) + addendum
+    #         ax4.plot(exp_time, success, color=key[2], linestyle=key[3], label=lbl, alpha=1.0)
+    #     else:
+    #         ax4.plot(exp_time, success, color=key[2], linestyle=key[3], alpha=1.0)
+    #
+    #     # plot model -- only good until 250 seconds
+    #     ax4.plot(model_time, model_success * 100, color=key[2], linestyle='--', alpha=0.3)
+    #     ax4.set_xlim([35, 130])
+    #     ax4.set_ylim([40, 100])
+    #
+    # ax4.vlines(40.0, 30, 103, colors='k', linestyles='--', label="Min ExpTime: 40 min")
+    # ax4.set_xlabel("Exposure time (minutes)")
+    # ax4.set_ylabel("Redshift Completeness (%)")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     fig.savefig("PS1_Sample_Stats.png", bbox_inches='tight')
     plt.close('all')
@@ -708,25 +938,58 @@ if plot_completeness:
 
     ps1_luminosities = []
     for g in ps1_galaxies:
+
+        prob_Gal = g[10]
+
         synth_B2 = g[4]
         z_dist = g[7]
 
-        L_Sun__L_star = 10**(-0.4*((synth_B2 - (5*np.log10(z_dist*1e+6)-5)) - 5.48))/L_B_star
+        L_Sun__L_star = 10 ** (-0.4 * ((synth_B2 - (5 * np.log10(z_dist * 1e+6) - 5)) - 5.48)) / L_B_star
         ps1_luminosities.append(L_Sun__L_star)
+
+    _95th_luminosities = []
+    for g in two_cuts_r_95th:
+        synth_B2 = g[4]
+        z_dist = g[7]
+
+        L_Sun__L_star = 10 ** (-0.4 * ((synth_B2 - (5 * np.log10(z_dist * 1e+6) - 5)) - 5.48)) / L_B_star
+        _95th_luminosities.append(L_Sun__L_star)
+
+    _50th_luminosities = []
+    for g in two_cuts_r_50th:
+        synth_B2 = g[4]
+        z_dist = g[7]
+
+        L_Sun__L_star = 10 ** (-0.4 * ((synth_B2 - (5 * np.log10(z_dist * 1e+6) - 5)) - 5.48)) / L_B_star
+        _50th_luminosities.append(L_Sun__L_star)
 
     total_luminosities = []
     # total_luminosities += glade_luminosities
     total_luminosities += ps1_luminosities
     total_lum = np.sum(total_luminosities)
 
-    mean_B_lum_density = 1.98e-2 # in units of (L10 = 10^10 L_B, solar)
-    sch_L10 = event_95th_volume.value * mean_B_lum_density
-    total_complete = total_lum/sch_L10
-    print("GLADE + PS1 Completeness: %0.4f" % total_complete)
+    total_95_lum = np.sum(_95th_luminosities)
+    total_50_lum = np.sum(_50th_luminosities)
 
+    _95th_complete = total_95_lum / total_lum
+    print("95th completeness wrt to PS1 sample: %s" % _95th_complete)
+    _50th_complete = total_50_lum / total_lum
+    print("50th completeness wrt to PS1 sample: %s" % _50th_complete)
+
+
+    mean_B_lum_density = 1.98e-2  # in units of (L10 = 10^10 L_B, solar)
+    sch_L10 = event_95th_volume.value * mean_B_lum_density
+    total_complete = total_lum / sch_L10
+    print("GLADE + PS1 Completeness: %0.4f" % total_complete)
 
     y_ps1, binEdges_ps1 = np.histogram(np.log10(ps1_luminosities), bins=np.linspace(-6.0, 2.0, 45))
     bincenters_ps1 = 0.5 * (binEdges_ps1[1:] + binEdges_ps1[:-1])
+
+    y_95, binEdges_95 = np.histogram(np.log10(_95th_luminosities), bins=np.linspace(-6.0, 2.0, 45))
+    bincenters_95 = 0.5 * (binEdges_95[1:] + binEdges_95[:-1])
+
+    y_50, binEdges_50 = np.histogram(np.log10(_50th_luminosities), bins=np.linspace(-6.0, 2.0, 45))
+    bincenters_50 = 0.5 * (binEdges_50[1:] + binEdges_50[:-1])
 
     # y_glade, binEdges_glade = np.histogram(np.log10(glade_luminosities), bins=np.linspace(-6.0, 2.0, 45))
     # bincenters_glade = 0.5 * (binEdges_ps1[1:] + binEdges_ps1[:-1])
@@ -734,15 +997,19 @@ if plot_completeness:
     # y_tot, binEdges_tot = np.histogram(np.log10(total_luminosities), bins=np.linspace(-6.0, 2.0, 45))
     # bincenters_tot = 0.5 * (binEdges_tot[1:] + binEdges_tot[:-1])
 
-    schect = lambda x, vol: h**3 * vol  * phi * x**(a+1) * np.exp(-x)
-    schect_input = 10**np.linspace(-6.0, 2.0, 45)
+    schect = lambda x, vol: h ** 3 * vol * phi * x ** (a + 1) * np.exp(-x)
+    schect_input = 10 ** np.linspace(-6.0, 2.0, 45)
     schect_output = schect(schect_input, event_95th_volume.value)
 
     fig = plt.figure(figsize=(10, 10), dpi=800)
     ax = fig.add_subplot(111)
 
     ax.plot(np.log10(schect_input), schect_output, 'r--')
+
     ax.plot(bincenters_ps1, y_ps1, '-', color='blue')
+    ax.plot(bincenters_95, y_95, '-', color='green')
+    ax.plot(bincenters_50, y_50, '-', color='orange')
+
     # ax.plot(bincenters_glade, y_glade, '-', color='green')
     # ax.plot(bincenters_tot, y_tot, '--', color='orange')
     # print(central_L_Sun__L_star)
@@ -766,6 +1033,75 @@ if plot_completeness:
     fig.savefig("PS1_GW190814_Completeness.png", bbox_inches='tight')
     plt.close('all')
 
+
+
+    fig = plt.figure(figsize=(10, 10), dpi=800)
+    ax = fig.add_subplot(111)
+
+    comp_bins = []
+    _95_comp_ratios = []
+    _50_comp_ratios = []
+
+    for i, bs in enumerate(bincenters_ps1):
+        ps1_N_interval = y_ps1[i]
+        _95_N_interval = y_95[i]
+        _50_N_interval = y_50[i]
+
+        _95_comp_ratio = 0
+        if _95_N_interval > 0 and ps1_N_interval > 0:
+            _95_comp_ratio = _95_N_interval / ps1_N_interval
+
+        _50_comp_ratio = 0
+        if _50_N_interval > 0 and ps1_N_interval > 0:
+            _50_comp_ratio = _50_N_interval / ps1_N_interval
+
+        comp_bins.append(bs)
+        _95_comp_ratios.append(_95_comp_ratio)
+        _50_comp_ratios.append(_50_comp_ratio)
+
+    # for left, right in zip(binEdges_ps1[:-1], binEdges_ps1[1:]):
+    #
+    #     bin_center = 0.5 * (right + left)
+    #     ps1_indices = np.where((np.log10(ps1_luminosities) > left) & (np.log10(ps1_luminosities) <= right))[0]
+    #     _95_indices = np.where((np.log10(_95th_luminosities) > left) & (np.log10(_95th_luminosities) <= right))[0]
+    #     _50_indices = np.where((np.log10(_50th_luminosities) > left) & (np.log10(_50th_luminosities) <= right))[0]
+    #
+    #     ps1_N_interval = np.sum(np.asarray(y_ps1)[ps1_indices])
+    #     _95_N_interval = np.sum(np.asarray(y_95)[_95_indices])
+    #     _50_N_interval = np.sum(np.asarray(y_50)[_50_indices])
+    #
+    #     _95_comp_ratio = _95_N_interval / ps1_N_interval
+    #     _50_comp_ratio = _50_N_interval / ps1_N_interval
+    #
+    #     #
+    #     # ps1_lum_interval = np.sum(np.asarray(ps1_luminosities)[ps1_indices])
+    #     # _95_lum_interval = np.sum(np.asarray(_95th_luminosities)[_95_indices])
+    #     # _50_lum_interval = np.sum(np.asarray(_50th_luminosities)[_50_indices])
+    #
+    #     # _95_comp_ratio = 0
+    #     # if _95_lum_interval > 0 and ps1_lum_interval > 0:
+    #     #     _95_comp_ratio = np.log10(_95_lum_interval) / np.log10(ps1_lum_interval)
+    #     #
+    #     # _50_comp_ratio = 0
+    #     # if _50_lum_interval > 0 and ps1_lum_interval > 0:
+    #     #     _50_comp_ratio = np.log10(_50_lum_interval) / np.log10(ps1_lum_interval)
+    #
+    #     comp_bins.append(bin_center)
+    #     _95_comp_ratios.append(_95_comp_ratio)
+    #     _50_comp_ratios.append(_50_comp_ratio)
+
+    ax.plot(comp_bins, _95_comp_ratios, '-', color='green')
+    ax.plot(comp_bins, _50_comp_ratios, '-', color='orange')
+    ax.set_xlim([-6.0, 2.0])
+    ax.set_xticks([-6, -5, -4, -3, -2, -1, 0, 1])
+    # logfmt = matplotlib.ticker.LogFormatterExponent(base=10.0, labelOnlyBase=True)
+    ax.set_xlabel(r"Log($L_B/L^{*}_{B}$)", fontsize=24)
+    # ax.set_ylabel(r"Log($N$)", fontsize=24)
+    ax.tick_params(axis='both', which='major', labelsize=24, length=8.0, width=2)
+    fig.savefig("PS1_GW190814_relative_Completeness.png", bbox_inches='tight')
+    plt.close('all')
+
+
 if plot_2D_histogram:
     # 2D histogram
     fig = plt.figure(figsize=(10, 10), dpi=800)
@@ -778,20 +1114,21 @@ if plot_2D_histogram:
         all_zs.append(p[5])
     hist_obj = ax.hist2d(all_zs, all_Bs, bins=[np.linspace(0.0, 0.1, 15), np.linspace(16.0, 22.0, 15)])
 
-    central_distances = [cosmo.luminosity_distance((z1 + z2)/2).value for z1, z2 in zip(hist_obj[1][:-1], hist_obj[1][1:])]
+    central_distances = [cosmo.luminosity_distance((z1 + z2) / 2).value for z1, z2 in
+                         zip(hist_obj[1][:-1], hist_obj[1][1:])]
     central_volumes = [(cosmo.comoving_volume(z2) -
                         cosmo.comoving_volume(z1)).value *
-                        sky_fraction_per_pix *
-                        len(pixel_result_north) for z1, z2 in zip(hist_obj[1][:-1], hist_obj[1][1:])]
+                       sky_fraction_per_pix *
+                       len(pixel_result_north) for z1, z2 in zip(hist_obj[1][:-1], hist_obj[1][1:])]
 
-    central_mags = [(m1 + m2)/2 for m1, m2 in zip(hist_obj[2][:-1], hist_obj[2][1:])]
+    central_mags = [(m1 + m2) / 2 for m1, m2 in zip(hist_obj[2][:-1], hist_obj[2][1:])]
 
     central_expected_number = []
     central_L_Sun__L_star = []
     for i in range(len(central_mags)):
         # compute luminosity expected in this mag bin for this volume shell
-        i_dist = central_distances[i] # Mpc
-        i_mag = central_mags[i] # mag
+        i_dist = central_distances[i]  # Mpc
+        i_mag = central_mags[i]  # mag
         i_vol = central_volumes[i]
         i_L_Sun__L_star = 10 ** (-0.4 * ((i_mag - (5 * np.log10(i_dist * 1e+6) - 5)) - 5.48)) / L_B_star
 
@@ -816,7 +1153,7 @@ if plot_2D_histogram:
     fig.savefig("PS1_GW190814_z_vs_B.png", bbox_inches='tight')
     plt.close('all')
 
-_2dF_radius = 1.05 # degrees
+_2dF_radius = 1.05  # degrees
 _2df_tiles = []
 if create_2dF_static_grid:
     # Create static grid for 2dF
@@ -894,8 +1231,8 @@ if create_2dF_static_grid:
             RA.append(ra)
             DEC.append(d)
 
-    print(RA)
-    print(DEC)
+    # print(RA)
+    # print(DEC)
 
     ebv = None
     with open('ebv.pkl', 'rb') as handle:
@@ -922,7 +1259,8 @@ if create_2dF_static_grid:
 
         select_detector_id = "SELECT id FROM Detector WHERE Name='%s'"
         insert_static_tile = "INSERT INTO StaticTile (Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id) VALUES (%s, %s, %s, %s, ST_PointFromText(%s, 4326), ST_GEOMFROMTEXT(%s, 4326), %s, %s)"
-        _2dF_detector = Detector("2dF", detector_width_deg=None, detector_height_deg=None, detector_radius_deg=_2dF_radius)
+        _2dF_detector = Detector("2dF", detector_width_deg=None, detector_height_deg=None,
+                                 detector_radius_deg=_2dF_radius)
         _2dF_id = query_db([select_detector_id % '2dF'])[0][0][0]
 
         static_tile_data = []
@@ -984,6 +1322,70 @@ if create_tile_pixel_relations:
     print("Removing `%s`..." % tile_pixel_upload_csv)
     os.remove(tile_pixel_upload_csv)
 
+def create_contour_polygon(percentile, all_map_pix, detector):
+    percentile_str = "%0.0fth" % (percentile * 100)
+    percentile_cuttoff = percentile
+    percentile_index = 0
+
+    print("Find index for %s..." % percentile_str)
+    cum_prob = 0.0
+    for i in range(len(all_map_pix)):
+        cum_prob += all_map_pix[i].prob
+        percentile_index = i
+
+        if (cum_prob >= percentile_cuttoff):
+            break
+    print("... %s" % percentile_index)
+
+    net_polygon = []
+    for p in all_map_pix[0:percentile_index]:
+        net_polygon += p.query_polygon
+    joined_poly = unary_union(net_polygon)
+
+    # Fix any seams
+    eps = 0.00001
+    merged_poly = []
+    smoothed_poly = joined_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
+
+    try:
+        test_iter = iter(smoothed_poly)
+        merged_poly = smoothed_poly
+    except TypeError as te:
+        merged_poly.append(smoothed_poly)
+
+    print("Number of sub-polygons in `merged_%s_poly`: %s" % (percentile_str, len(merged_poly)))
+    sql_poly = SQL_Polygon(merged_poly, detector)
+    return sql_poly
+
+def write_contour_poly_ds9(name, sql_poly):
+
+    clr = "red"
+    if name == "70":
+        clr = "yellow"
+    elif name == "80":
+        clr = "green"
+    elif name == "90":
+        clr = "blue"
+    elif name == "95":
+        clr = "cyan"
+
+    with open(path_format.format(ps1_strm_dir, "GW190814_%s.reg" % name), 'w') as regfile:
+        regfile.write("# Region file format: DS9 version 4.1\n")
+        regfile.write("global color=%s dashlist=8 3 width=1 font=\"helvetica 10 normal roman\" select=1 " % clr +
+                      "highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n")
+        regfile.write("fk5\n")
+
+        for pi, poly in enumerate(sql_poly.query_polygon):
+            regfile.write("polygon(")
+            ra_deg, dec_deg = zip(*[(c[0], c[1]) for c in poly.exterior.coords])
+            c_list = []
+            for ci in range(len(ra_deg)):
+                ri = ra_deg[ci]
+                di = dec_deg[ci]
+                c_list.append("%0.8f" % ri)
+                c_list.append("%0.8f" % di)
+            regfile.write("%s)\n" % ",".join(c_list))
+
 if plot_localization:
 
     # Get configured Detectors
@@ -992,105 +1394,25 @@ if plot_localization:
     detectors = [Detector(dr[1], float(dr[2]), float(dr[2]), detector_id=int(dr[0])) for dr in detector_result]
 
     # region build multipolygons
-    cutoff_50th = 0.5
-    cutoff_90th = 0.90
-    cutoff_95th = 0.95
-    index_50th = 0
-    index_90th = 0
-    index_95th = 0
+    poly_dict = OrderedDict()
+    sql_50_poly = create_contour_polygon(0.5, all_map_pix, detectors[0])
+    sql_70_poly = create_contour_polygon(0.7, all_map_pix, detectors[0])
+    sql_80_poly = create_contour_polygon(0.8, all_map_pix, detectors[0])
+    sql_90_poly = create_contour_polygon(0.9, all_map_pix, detectors[0])
+    sql_95_poly = create_contour_polygon(0.95, all_map_pix, detectors[0])
 
-    print("Find index for 50th...")
-    cum_prob = 0.0
-    for i in range(len(all_map_pix)):
-        cum_prob += all_map_pix[i].prob
-        index_50th = i
+    poly_dict["50"] = (sql_50_poly, "black", 1.2, "None", 1.0)
+    poly_dict["70"] = (sql_70_poly, "black", 0.9, "None", 1.0)
+    poly_dict["80"] = (sql_80_poly, "black", 0.7, "None", 1.0)
+    poly_dict["90"] = (sql_90_poly, "black", 0.5, "None", 0.8)
+    poly_dict["95"] = (sql_95_poly, "black", 0.5, "black", 0.05)
 
-        if (cum_prob >= cutoff_50th):
-            break
+    # Write out sql polygons as regions
+    for key, value in poly_dict.items():
+        write_contour_poly_ds9(key, value[0])
 
-    print("... %s" % index_50th)
-
-    print("Find index for 90th...")
-    cum_prob = 0.0
-    for i in range(len(all_map_pix)):
-        cum_prob += all_map_pix[i].prob
-        index_90th = i
-
-        if (cum_prob >= cutoff_90th):
-            break
-    print("... %s" % index_90th)
-
-    print("Find index for 95th...")
-    cum_prob = 0.0
-    for i in range(len(all_map_pix)):
-        cum_prob += all_map_pix[i].prob
-        index_95th = i
-
-        if (cum_prob >= cutoff_95th):
-            break
-    print("... %s" % index_95th)
-
-    print("Build multipolygons...")
-    net_50_polygon = []
-    for p in all_map_pix[0:index_50th]:
-        net_50_polygon += p.query_polygon
-    joined_50_poly = unary_union(net_50_polygon)
-
-    # Fix any seams
-    eps = 0.00001
-    merged_50_poly = []
-    smoothed_50_poly = joined_50_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
-
-    try:
-        test_iter = iter(smoothed_50_poly)
-        merged_50_poly = smoothed_50_poly
-    except TypeError as te:
-        merged_50_poly.append(smoothed_50_poly)
-
-    print("Number of sub-polygons in `merged_50_poly`: %s" % len(merged_50_poly))
-    sql_50_poly = SQL_Polygon(merged_50_poly, detectors[0])
-
-    net_90_polygon = []
-    for p in all_map_pix[0:index_90th]:
-        net_90_polygon += p.query_polygon
-    joined_90_poly = unary_union(net_90_polygon)
-
-    # Fix any seams
-    merged_90_poly = []
-    smoothed_90_poly = joined_90_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1, join_style=JOIN_STYLE.mitre)
-
-    try:
-        test_iter = iter(smoothed_90_poly)
-        merged_90_poly = smoothed_90_poly
-    except TypeError as te:
-        merged_90_poly.append(smoothed_90_poly)
-
-    print("Number of sub-polygons in `merged_90_poly`: %s" % len(merged_90_poly))
-    sql_90_poly = SQL_Polygon(merged_90_poly, detectors[0])
-    print("... done.")
-
-
-    net_95_polygon = []
-    for p in all_map_pix[0:index_95th]:
-        net_95_polygon += p.query_polygon
-    joined_95_poly = unary_union(net_95_polygon)
-
-    # Fix any seams
-    merged_95_poly = []
-    smoothed_95_poly = joined_95_poly.buffer(eps, 1, join_style=JOIN_STYLE.mitre).buffer(-eps, 1,
-                                                                                         join_style=JOIN_STYLE.mitre)
-
-    try:
-        test_iter = iter(smoothed_95_poly)
-        merged_95_poly = smoothed_95_poly
-    except TypeError as te:
-        merged_95_poly.append(smoothed_95_poly)
-
-    print("Number of sub-polygons in `merged_95_poly`: %s" % len(merged_95_poly))
-    sql_95_poly = SQL_Polygon(merged_95_poly, detectors[0])
-    print("... done.")
+    print("Done")
     # endregion
-
 
     fig = plt.figure(figsize=(10, 10), dpi=1000)
     ax = fig.add_subplot(111)
@@ -1112,28 +1434,16 @@ if plot_localization:
     print("max prob: %s" % max_prob)
     norm = colors.Normalize(min_prob, max_prob)
 
-    # Write out 95th polygons as regions
-    for pi, poly in enumerate(sql_95_poly.query_polygon):
-
-        ra_deg, dec_deg = zip(*[(c[0], c[1]) for c in poly.exterior.coords])
-
-        with open(path_format.format(ps1_strm_dir, "GW190814_95th_%s.reg" % pi), 'w') as regfile:
-            regfile.write("# Region file format: DS9 version 4.1\n")
-            regfile.write("global color=green dashlist=8 3 width=1 font=\"helvetica 10 normal roman\" select=1 highlite=1 dash=0 fixed=0 edit=1 move=1 delete=1 include=1 source=1\n")
-            regfile.write("fk5\n")
-            regfile.write("polygon(")
-
-            c_list = []
-            for ci in range(len(ra_deg)):
-                ri = ra_deg[ci]
-                di = dec_deg[ci]
-                c_list.append("%0.8f" % ri)
-                c_list.append("%0.8f" % di)
-            regfile.write("%s)\n" % ",".join(c_list))
-
-    sql_50_poly.plot(m, ax, edgecolor='black', linewidth=1.0, facecolor='None')
-    sql_90_poly.plot(m, ax, edgecolor='black', linewidth=0.75, facecolor='None', alpha=0.8)
-    sql_95_poly.plot(m, ax, edgecolor='k', linewidth=0.50, facecolor='k', alpha=0.05)
+    for key, poly_tuple in poly_dict.items():
+        # key: (poly, edgecolor, linewidth, facecolor, alpha)
+        poly_tuple[0].plot(m, ax, edgecolor=poly_tuple[1], linewidth=poly_tuple[2], facecolor=poly_tuple[3],
+                           alpha=poly_tuple[4])
+    #
+    # sql_50_poly.plot(m, ax, edgecolor='black', linewidth=1.2, facecolor='None')
+    # sql_70_poly.plot(m, ax, edgecolor='black', linewidth=0.90, facecolor='None')
+    # sql_80_poly.plot(m, ax, edgecolor='black', linewidth=0.70, facecolor='None')
+    # sql_90_poly.plot(m, ax, edgecolor='black', linewidth=0.50, facecolor='None', alpha=0.8)
+    # sql_95_poly.plot(m, ax, edgecolor='k', linewidth=0.50, facecolor='k', alpha=0.05)
 
     for mag_range, galaxy_list_tuple in ps1_galaxies_by_mag_bin.items():
 
@@ -1142,10 +1452,10 @@ if plot_localization:
 
         for i, g in enumerate(galaxy_list):
             ra, dec = g[1], g[2]
-            angular_radius_deg = 15/3600. # 15 arcseconds
+            angular_radius_deg = 15 / 3600.  # 15 arcseconds
 
             c1 = Point(ra, dec).buffer(angular_radius_deg)
-            c2 = shapely_transform(lambda x, y, z = None: ((ra - (ra - x)/np.abs(np.cos(np.radians(y)))), y), c1)
+            c2 = shapely_transform(lambda x, y, z=None: ((ra - (ra - x) / np.abs(np.cos(np.radians(y)))), y), c1)
 
             ra_deg, dec_deg = zip(*[(c[0], c[1]) for c in c2.exterior.coords])
 
@@ -1155,7 +1465,6 @@ if plot_localization:
 
     for t in _2df_tiles:
         t.plot(m, ax, edgecolor="red", facecolor="None", linewidth="0.5")
-
 
     # region Draw axes and colorbar
     # draw parallels.
@@ -1239,28 +1548,10 @@ if plot_localization:
     plt.close('all')
     print("... Done.")
 
-if plot_ozDES:
-
-    fig = plt.figure(figsize=(10, 8), dpi=800)
-    ax1 = fig.add_subplot(111)
-
-    for key in osDES_keylist:
-        exp_time = ozDES_data[key[0]][key[1]][0]
-        z_complete = np.asarray(ozDES_data[key[0]][key[1]][1])*100.0
-
-        if key[4] != "":
-            ax1.plot(exp_time, z_complete, color=key[2], linestyle=key[3], label=key[4])
-        else:
-            ax1.plot(exp_time, z_complete, color=key[2], linestyle=key[3])
-
-    ax1.set_xlim([0, 1600])
-    ax1.set_xlabel("Exposure time (minutes)")
-    ax1.set_ylabel("Redshift Completeness (%)")
-    ax1.legend(loc="lower right")
-    fig.savefig(path_format.format(ps1_strm_dir, "OzDES_Fig5.png"), bbox_inches='tight')
-    plt.close('all')
-
 # endregion
+
+
+
 
 
 end = time.time()
@@ -1268,4 +1559,3 @@ duration = (end - start)
 print("\n********* start DEBUG ***********")
 print("Execution time: %s" % duration)
 print("********* end DEBUG ***********\n")
-
