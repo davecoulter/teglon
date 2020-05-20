@@ -58,7 +58,7 @@ healpy==1.9.1
 heapdict==1.0.0
 htc-utils==0.1.0
 html5lib==1.0.1
-httplib2==0.12.0
+httplib2==0.18.0
 hyperlink==18.0.0
 idna==2.7
 imageio==2.4.1
