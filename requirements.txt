@@ -27,7 +27,7 @@ conda==4.5.11
 constantly==15.1.0
 costools==1.2.2.dev0
 crds==7.2.9
-cryptography==2.3.1
+cryptography==3.2
 cubeviz==0.0.2
 cycler==0.10.0
 Cython==0.28.5
