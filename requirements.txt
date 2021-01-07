@@ -82,7 +82,7 @@ ligo-segments==1.1.0
 ligo.skymap==0.0.12
 locket==0.2.0
 lscsoft-glue==1.60.0
-lxml==4.2.5
+lxml==4.6.2
 MarkupSafe==1.0
 matplotlib==2.2.2
 mistune==0.8.3
