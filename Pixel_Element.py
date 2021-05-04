@@ -13,7 +13,7 @@ from shapely.geometry import Point
 from Teglon_Shape import *
 
 
-class Pixel_Element(Telgon_Shape):
+class Pixel_Element(Teglon_Shape):
     def __init__(self, index, nside, prob, pixel_id=None, mean_dist=None, stddev_dist=None):
 
         self.tile_references = []
@@ -27,7 +27,7 @@ class Pixel_Element(Telgon_Shape):
 
         # Used to check if this object is within this "radius proxy" of the coordinate signularity
         self.__radius_proxy = 5 * np.sqrt(hp.nside2pixarea(self.nside, degrees=True) / np.pi)
-        self.__polygon = None
+        self.__multipolygon = None
         self.__query_polygon = None
         self.__query_polygon_string = None
 
@@ -77,19 +77,23 @@ class Pixel_Element(Telgon_Shape):
         return self.__radius_proxy
 
     @property  # Returns list of polygon
-    def polygon(self):
+    def multipolygon(self):
 
-        if not self.__polygon:
+        if not self.__multipolygon:
+
             pixel_xyz_vertices = hp.boundaries(self.nside, pix=self.index)
             theta, phi = hp.vec2ang(np.transpose(pixel_xyz_vertices))
 
             ra_rad = phi
             dec_rad = (np.pi / 2. - theta)
-
             pixel_radian_vertices = [[ra, dec] for ra, dec in zip(ra_rad, dec_rad)]
-            self.__polygon = geometry.Polygon(pixel_radian_vertices)
 
-        return [self.__polygon]
+            self.__multipolygon = [geometry.Polygon(pixel_radian_vertices)]
+        return self.__multipolygon
+
+    @property  # Returns list of polygon
+    def projected_multipolygon(self):
+        return self.multipolygon
 
     # NOTE -- always assuming RA coordinate of the form [0, 360]
     @property
@@ -104,32 +108,7 @@ class Pixel_Element(Telgon_Shape):
     def query_polygon_string(self):
 
         if not self.__query_polygon_string:
-
-            mp_str = "MULTIPOLYGON("
-            multipolygon = []
-
-            for p in self.query_polygon:
-
-                mp = "(("
-                ra_deg, dec_deg = zip(*[(coord_deg[0], coord_deg[1]) for coord_deg in p.exterior.coords])
-
-                # For the SRS in the DB, we need to emulate lat,lon
-                for i in range(len(ra_deg)):
-                    mp += "%s %s," % (dec_deg[i], ra_deg[i] - 180.0)
-
-                mp = mp[:-1]  # trim the last ","
-                mp += ")),"
-                multipolygon.append(mp)
-
-            # Use the multipolygon string to create the WHERE clause
-            multipolygon[-1] = multipolygon[-1][:-1]  # trim the last "," from the last object
-
-            for mp in multipolygon:
-                mp_str += mp
-            mp_str += ")"
-
-            self.__query_polygon_string = mp_str;
-
+            self.self.__query_polygon_string = self.create_query_polygon_string(initial_poly_in_radian=True)
         return self.__query_polygon_string
 
     def enclosed_pixel_indices(self, nside_out):

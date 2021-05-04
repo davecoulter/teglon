@@ -63,6 +63,7 @@ from shapely.geometry import JOIN_STYLE
 import healpy as hp
 from ligo.skymap import distance
 
+from Detector import *
 from HEALPix_Helpers import *
 from Tile import *
 from SQL_Polygon import *
@@ -462,11 +463,13 @@ class Teglon:
         band_F99 = float(band_result[2])
 
         telescope_name = detector_mapping[self.options.tele]
-        detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec FROM Detector WHERE Name='%s'"
+        detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec, ST_AsText(Poly) FROM Detector WHERE Name='%s'"
         detector_result = query_db([detector_select_by_name % telescope_name])[0][0]
         detector_id = int(detector_result[0])
-        detector = Detector(detector_result[1], float(detector_result[2]), float(detector_result[3]),
-                            detector_id=detector_id)
+        detector_name = detector_result[1]
+        detector_poly = detector_result[8]
+        detector_vertices = Detector.get_detector_vertices_from_teglon_db(detector_poly)
+        detector = Detector(detector_name, detector_vertices, detector_id=detector_id)
 
         galaxies_to_plot = []
         gal_ra = []
@@ -494,7 +497,10 @@ class Teglon:
                 for row in csvreader:
                     name = row[0]
                     c = coord.SkyCoord(row[1], row[2], unit=(u.hour, u.deg))
-                    t = Tile(c.ra.degree, c.dec.degree, detector.deg_width, detector.deg_height, healpix_map_nside)
+
+                    # t = Tile(c.ra.degree, c.dec.degree, detector.deg_width, detector.deg_height, healpix_map_nside)
+                    t = Tile(c.ra.degree, c.dec.degree, detector=detector, nside=healpix_map_nside)
+
                     t.field_name = name
                     t.net_prob = float(row[6])
                     tiles_to_plot.append(t)
@@ -509,7 +515,8 @@ class Teglon:
                     ot.Mag_Lim,
                     d.`Name` as DetectorName,
                     d.Deg_width,
-                    d.Deg_height
+                    d.Deg_height,
+                    ot.PositionAngle
                 FROM ObservedTile ot
                 JOIN Detector d on d.id = ot.Detector_id
                 WHERE ot.HealpixMap_id = %s;
@@ -519,7 +526,9 @@ class Teglon:
             print("Map tiles: %s" % len(map_tiles))
             for mt in map_tiles:
                 c = coord.SkyCoord(mt[1], mt[2], unit=(u.deg, u.deg))
-                t = Tile(c.ra.degree, c.dec.degree, float(mt[7]), float(mt[8]), healpix_map_nside)
+                # t = Tile(c.ra.degree, c.dec.degree, float(mt[7]), float(mt[8]), healpix_map_nside)
+                t = Tile(c.ra.degree, c.dec.degree, detector=detector, nside=healpix_map_nside,
+                         position_angle_deg=float(mt[9]))
                 t.field_name = mt[6]
                 tiles_to_plot.append(t)
 
@@ -729,7 +738,7 @@ class Teglon:
             merged_inner_poly.append(smoothed_inner_poly)
 
         print("Number of sub-polygons in `merged_inner_poly`: %s" % len(merged_inner_poly))
-        sql_inner_poly = SQL_Polygon(merged_inner_poly, detector)
+        sql_inner_poly = SQL_Polygon(merged_inner_poly) # , detector
 
         net_outer_polygon = []
         for p in map_pix_sorted[0:index_outer]:
@@ -747,7 +756,7 @@ class Teglon:
             merged_outer_poly.append(smoothed_outer_poly)
 
         print("Number of sub-polygons in `merged_outer_poly`: %s" % len(merged_outer_poly))
-        sql_outer_poly = SQL_Polygon(merged_outer_poly, detector)
+        sql_outer_poly = SQL_Polygon(merged_outer_poly) # , detector
         print("... done.")
 
         # Plot!!

@@ -24,20 +24,6 @@ import multiprocessing as mp
 from scipy import spatial
 
 
-class Detector:
-    def __init__(self, detector_name, detector_width_deg, detector_height_deg, detector_radius_deg=None,
-                 detector_id=None):
-        self.id = detector_id
-        self.name = detector_name
-        self.deg_width = detector_width_deg
-        self.deg_height = detector_height_deg
-        self.deg_radius = detector_radius_deg
-        self.area = None
-
-    def __str__(self):
-        return str(self.__dict__)
-
-
 class Unpacked_Healpix:
     def __init__(self, file_name, prob, distmu, distsigma, distnorm, header, nside,
                  npix, area_per_px, linestyle, compute_contours=True, custom_percentile=None):

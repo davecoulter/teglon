@@ -61,6 +61,7 @@ import healpy as hp
 from ligo.skymap import distance
 
 from HEALPix_Helpers import *
+from Detector import *
 from Tile import *
 from SQL_Polygon import *
 from Pixel_Element import *
@@ -91,7 +92,7 @@ db_pwd = db_config.get('database', 'DATABASE_PASSWORD')
 db_host = db_config.get('database', 'DATABASE_HOST')
 db_port = db_config.get('database', 'DATABASE_PORT')
 
-
+# region db methods
 def bulk_upload(query):
     success = False
     try:
@@ -312,7 +313,7 @@ def batch_insert(insert_statement, insert_data, batch_size=50000):
     print("\n********* start DEBUG ***********")
     print("batch_insert execution time: %s" % (_tend - _tstart))
     print("********* end DEBUG ***********\n")
-
+# endregion
 
 class Teglon:
 
@@ -619,7 +620,7 @@ class Teglon:
         healpix_map_select = "SELECT id FROM HealpixMap WHERE GWID = '%s' and Filename = '%s'"
 
         band_select = "SELECT id, Name, F99_Coefficient FROM Band WHERE `Name`='%s'"
-        detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec FROM Detector WHERE Name='%s'"
+        detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec, ST_AsText(Poly) FROM Detector WHERE Name='%s'"
 
         # 4D NON-BOX QUERY
         # REPLACEMENT PARAMETERS: (band_F99, detector_id, healpix_map_id, self.options.cum_prob, band_F99,

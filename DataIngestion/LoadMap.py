@@ -61,6 +61,7 @@ import healpy as hp
 from ligo.skymap import distance
 
 from HEALPix_Helpers import *
+from Detector import *
 from Tile import *
 from SQL_Polygon import *
 from Pixel_Element import *
@@ -548,14 +549,24 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
                 r = requests.get(gw_url)
                 data = r.text
                 soup = BeautifulSoup(data, "lxml")
-                tds = soup.find("table", {"class": "superevent"}).find_all('tr')[1].find_all('td')
 
-                FAR_hz = tds[3].text
-                FAR_per_yr = tds[4].text
-                t_start = tds[5].text
-                t_0 = tds[6].text
-                t_end = tds[7].text
-                UTC_submission_time = parse(tds[8].text)
+                ## Current HTML is different. HACK: adding hard coded values so that this just works
+                # tds = soup.find("table", {"class": "superevent"}).find_all('tr')[1].find_all('td')
+                # FAR_hz = tds[3].text
+                # FAR_per_yr = tds[4].text
+                # t_start = tds[5].text
+                # t_0 = tds[6].text
+                # t_end = tds[7].text
+                # UTC_submission_time = parse(tds[8].text)
+
+                # 0814 values
+                # t_0 = 1249852257.012957
+                # UTC_submission_time = parse("2019-08-14 21:11:18")
+
+                # 0425 values
+                t_0 = 1240215503.01
+                UTC_submission_time = parse("2019-04-25 08:18:26")
+
 
                 t2 = time.time()
                 print("\n********* start DEBUG ***********")
@@ -820,23 +831,28 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
         else:
             print("Building tile-pixel relation...")
 
-            select_detector_id = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area FROM Detector WHERE Name='%s'"
-            tile_select = "SELECT id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id FROM StaticTile WHERE Detector_id = %s "
+            # select_detector_id = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area FROM Detector WHERE Name='%s'"
+            select_detector = "SELECT id, Name, ST_AsText(Poly) FROM Detector WHERE Name='%s';"
+            tile_select = "SELECT id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id FROM StaticTile WHERE Detector_id = %s;"
             tile_pixel_upload_csv = "%s/%s_tile_pixel_upload.csv" % (formatted_healpix_dir, self.options.gw_id)
 
             tile_pixel_data = []
             if not self.options.skip_swope:
                 ##### DO SWOPE ######
                 # Get detector -> static tile rows
-                swope_detector = query_db([select_detector_id % "SWOPE"])[0][0]
-                swope_id = swope_detector[0]
+                swope_detector_result = query_db([select_detector % "SWOPE"])[0][0]
+                swope_id = swope_detector_result[0]
+                swope_name = swope_detector_result[1]
+                swope_poly = swope_detector_result[2]
+                swope_detector_vertices = Detector.get_detector_vertices_from_teglon_db(swope_poly)
+                swope_detector = Detector(swope_name, swope_detector_vertices, detector_id=swope_id)
                 swope_static_tile_rows = query_db([tile_select % swope_id])[0]
 
                 swope_tiles = []
                 for r in swope_static_tile_rows:
-                    t = Tile(float(r[3]), float(r[4]), float(swope_detector[2]), float(swope_detector[3]), map_nside)
-                    t.id = int(r[0])
-                    t.mwe = float(r[7])
+
+                    t = Tile(central_ra_deg=float(r[3]), central_dec_deg=float(r[4]), detector=swope_detector,
+                             nside=map_nside, tile_id=int(r[0]), tile_mwe=float(r[7]))
                     swope_tiles.append(t)
 
                 # clean up
@@ -889,15 +905,18 @@ combination''' % (self.options.gw_id, self.options.healpix_file))
             if not self.options.skip_thacher:
                 ##### DO THACHER ######
                 # Get detector -> static tile rows
-                thacher_detector = query_db([select_detector_id % "THACHER"])[0][0]
-                thacher_id = thacher_detector[0]
+                thacher_detector_result = query_db([select_detector % "SWOPE"])[0][0]
+                thacher_id = thacher_detector_result[0]
+                thacher_name = thacher_detector_result[1]
+                thacher_poly = thacher_detector_result[2]
+                thacher_detector_vertices = Detector.get_detector_vertices_from_teglon_db(thacher_poly)
+                thacher_detector = Detector(thacher_name, thacher_detector_vertices, detector_id=thacher_id)
                 thacher_static_tile_rows = query_db([tile_select % thacher_id])[0]
 
                 thacher_tiles = []
                 for r in thacher_static_tile_rows:
-                    t = Tile(float(r[3]), float(r[4]), float(thacher_detector[2]), float(thacher_detector[3]), map_nside)
-                    t.id = int(r[0])
-                    t.mwe = float(r[7])
+                    t = Tile(central_ra_deg=float(r[3]), central_dec_deg=float(r[4]), detector=thacher_detector,
+                             nside=map_nside, tile_id=int(r[0]), tile_mwe=float(r[7]))
                     thacher_tiles.append(t)
 
                 # clean up
