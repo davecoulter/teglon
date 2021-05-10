@@ -216,7 +216,7 @@ class Teglon_Shape(metaclass=ABCMeta):
 
         return query_polygon
 
-    def create_query_polygon_string(self, initial_poly_in_radian = True):
+    def create_query_polygon_string(self, initial_poly_in_radian=True):
         mp_str = "MULTIPOLYGON("
         multipolygon = []
         for geom in self.projected_multipolygon:

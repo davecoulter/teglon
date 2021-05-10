@@ -19,6 +19,7 @@ from Pixel_Element import *
 from SQL_Polygon import *
 import pprint
 import time
+import astropy.time
 import math
 from matplotlib.patches import Polygon
 from shapely import geometry
@@ -396,7 +397,7 @@ class Detector(Teglon_Shape):
 
 
 
-is_debug = True
+is_debug = False
 if is_debug:
     # HACK - these are both diagnostic AND actual update/insert commands. Refactor this to it's own initialization file
     update_detectors = False
@@ -457,6 +458,7 @@ if is_debug:
     healpix_map_id = 8
     healpix_map_nside = 256
     ztf_id = 47
+    xrt_id = 13
     ztf_pa = 0.0
     bat_fov_id = 49
 
@@ -619,6 +621,10 @@ if is_debug:
             if inst_id not in instrument_names:
                 continue
 
+            # Swift XRT doesn't have any limiting mags for 0425
+            if inst_id == xrt_id:
+                continue
+
             name = instrument_names[inst_id]
             tm_detector = Detector(name, inst_vert)
 
@@ -652,22 +658,27 @@ if is_debug:
 
         treasure_map_pointings = {}
         for pr in pointing_result:
-
-            id = pr["instrumentid"]
+            pointing_id = pr["id"]
+            inst_id = pr["instrumentid"]
             pa = pr["pos_angle"]
+            band = pr["band"]
+            obs_time = pr["time"]
+            mag_lim = pr["depth"]
 
-            # Hack -- we don't want to plot the Swift BAT field of view. Skip it...
-            if id == bat_fov_id:
+
+            # Hack -- we don't want to plot the Swift BAT field of view. Also, XRT has no "depth" stat. Skip these...
+            if inst_id == bat_fov_id or inst_id == xrt_id:
                 continue
 
             # HACK -- ZTF is reported at a PA=45 degrees; correct this to PA=0
-            if id == ztf_id:
+            if inst_id == ztf_id:
                 pa = ztf_pa
 
-            if id not in treasure_map_pointings:
-                treasure_map_pointings[id] = []
+            if inst_id not in treasure_map_pointings:
+                treasure_map_pointings[inst_id] = []
 
-            treasure_map_pointings[id].append((pa, get_skycoord_from_tm_point(pr["position"])))
+            treasure_map_pointings[inst_id].append((pa, get_skycoord_from_tm_point(pr["position"]), band, obs_time,
+                                                    pointing_id, mag_lim))
 
         with open('tm_detector_test.pkl', 'wb') as handle:
             pickle.dump(treasure_map_detectors, handle, protocol=pickle.HIGHEST_PROTOCOL)
@@ -780,34 +791,156 @@ if is_debug:
         13: "orange"
     }
 
-    do_full_sky = True
+    do_full_sky = False
     if do_full_sky:
-        fig = plt.figure(figsize=(20, 15))
+        # fig = plt.figure(figsize=(20, 15))
+        # ax = fig.add_subplot(111)
+        # m = Basemap(projection='moll', lon_0=180.0)
+
+        select_mwe_pix = '''
+                    SELECT sp.Pixel_Index
+                    FROM SkyPixel sp
+                    WHERE sp.id IN
+                    (
+                        SELECT sp.Parent_Pixel_id
+                        FROM SkyPixel sp
+                        WHERE sp.id IN
+                        (
+                            SELECT sp.Parent_Pixel_id
+                            FROM SkyPixel sp
+                            JOIN SkyPixel_EBV sp_ebv ON sp_ebv.N128_SkyPixel_id = sp.id
+                            WHERE sp_ebv.EBV*%s > %s and NSIDE = 128
+                        ) and NSIDE = 64
+                    ) and NSIDE = 32
+                '''
+        mwe_pix_result = query_db([select_mwe_pix % ("2.285", "0.5")])[0]
+        mwe_pix = [Pixel_Element(int(mp[0]), 32, 0.0) for mp in mwe_pix_result]
+        # for p in mwe_pix:
+        #     # p.plot(m, ax, edgecolor='cornflowerblue', linewidth=0.5, facecolor='None', alpha=0.15)
+        #     p.plot(m, ax, edgecolor='None', linewidth=0.5, facecolor='cornflowerblue', alpha=0.2)
+        #
+        # sql_inner_poly.plot(m, ax, edgecolor='k', linewidth=0.75, facecolor='None')
+        # sql_outer_poly.plot(m, ax, edgecolor='k', linewidth=0.5, facecolor='None')
+        #
+        # for inst_id, tile_list in treasure_map_tiles.items():
+        #
+        #     zo = 9999
+        #     alph = 1.0
+        #     lw = 0.5
+        #     if inst_id == ztf_id:
+        #         zo = 9998
+        #         alph = 0.15
+        #         lw=0.2
+        #
+        #     for t in tile_list:
+        #         t.plot(m, ax, edgecolor=clrs[inst_id], facecolor='None', linestyle='-', linewidth=lw, zorder=zo, alpha=alph)
+        #
+        # parallels = np.arange(-90., 90., 12.)
+        # dec_ticks = m.drawparallels(parallels, labels=[0, 1, 0, 0], linewidth=0.5, color="silver", alpha=0.25)
+        # meridians = np.arange(0., 360., 24.0)
+        # ra_ticks = m.drawmeridians(meridians, labels=[0, 0, 0, 1], linewidth=0.5, color="silver", alpha=0.25)
+        #
+        # ax.invert_xaxis()
+        #
+        # fig.savefig("GW0425_TM_data.png", bbox_inches='tight')
+        # plt.close('all')
+
+
+        ############################
+        # select_mwe_pix = '''
+        #                             SELECT sp.Pixel_Index
+        #                             FROM SkyPixel sp
+        #                             WHERE sp.id IN
+        #                             (
+        #                                 SELECT sp.Parent_Pixel_id
+        #                                 FROM SkyPixel sp
+        #                                 WHERE sp.id IN
+        #                                 (
+        #                                     SELECT sp.Parent_Pixel_id
+        #                                     FROM SkyPixel sp
+        #                                     JOIN SkyPixel_EBV sp_ebv ON sp_ebv.N128_SkyPixel_id = sp.id
+        #                                     WHERE sp_ebv.EBV*%s > %s and NSIDE = 128
+        #                                 ) and NSIDE = 64
+        #                             ) and NSIDE = 32
+        #                         '''
+        # mwe_pix_result = query_db([select_mwe_pix % ("2.285", "0.5")])[0]
+        # mwe_pix = [Pixel_Element(int(mp[0]), 32, 0.0) for mp in mwe_pix_result]
+        # print(len(mwe_pix))
+        #
+        #
+        # fig = plt.figure(figsize=(10, 10), dpi=1000)
+        # ax = fig.add_subplot(111)
+        # m = Basemap(projection='ortho', lon_0=240.0, lat_0=20.0)
+        #
+        #
+        # for p in mwe_pix:
+        #     # _x, _y = m(p.coord.ra.degree, p.coord.dec.degree)
+        #     # m.plot(_x, _y, marker=".", color="cornflowerblue", alpha=0.10, markersize=20.0)
+        #     # lon_0 = 240.0, lat_0 = 20.0
+        #     if p.coord.ra.degree < 345 and p.coord.ra.degree > 195 and p.coord.dec.degree < 85.0 and p.coord.dec.degree > -60:
+        #         p.plot(m, ax, edgecolor='None', linewidth=0.5, facecolor='cornflowerblue', alpha=0.20)
+        #         # m.plot(_x, _y, marker=".", color="cornflowerblue", alpha=0.10)
+        #
+        # sql_inner_poly.plot(m, ax, edgecolor='k', linewidth=0.75, facecolor='None')
+        # sql_outer_poly.plot(m, ax, edgecolor='k', linewidth=0.5, facecolor='None')
+        # for inst_id, tile_list in treasure_map_tiles.items():
+        #
+        #     zo = 9999
+        #     alph = 1.0
+        #     lw = 0.5
+        #     if inst_id == ztf_id:
+        #         zo = 9998
+        #         alph = 0.15
+        #         lw=0.2
+        #
+        #     for t in tile_list:
+        #         t.plot(m, ax, edgecolor=clrs[inst_id], facecolor='None', linestyle='-', linewidth=lw, zorder=zo, alpha=alph)
+        #
+        # parallels = np.arange(-90., 90., 12.)
+        # dec_ticks = m.drawparallels(parallels, labels=[0, 1, 0, 0], linewidth=0.5, color="silver", alpha=0.25)
+        # meridians = np.arange(0., 360., 24.0)
+        # ra_ticks = m.drawmeridians(meridians, labels=[0, 0, 0, 1], linewidth=0.5, color="silver", alpha=0.25)
+        #
+        # ax.invert_xaxis()
+        #
+        # fig.savefig("GW0425_TM_eastern_ortho.png", bbox_inches='tight')
+        # plt.close('all')
+        #
+        fig = plt.figure(figsize=(10, 10), dpi=1000)
         ax = fig.add_subplot(111)
-        m = Basemap(projection='moll', lon_0=180.0)
+        m = Basemap(projection='ortho', lon_0=60.0, lat_0=-30.0)
 
         sql_inner_poly.plot(m, ax, edgecolor='k', linewidth=0.75, facecolor='None')
         sql_outer_poly.plot(m, ax, edgecolor='k', linewidth=0.5, facecolor='None')
 
-        # for inst_id, pp in projected_pointings.items():
-        for inst_id, tile_list in treasure_map_tiles.items():
+        for p in mwe_pix:
+            # or (p.coord.ra.degree > 359.999 and p.coord.ra.degree < 360)
+            if ((p.coord.ra.degree < 130 and p.coord.ra.degree >= 0.0)) and p.coord.dec.degree < 48.0 and p.coord.dec.degree > -90:
+                p.plot(m, ax, edgecolor='None', linewidth=0.5, facecolor='cornflowerblue', alpha=0.20)
 
+        for inst_id, tile_list in treasure_map_tiles.items():
             zo = 9999
+            alph = 1.0
+            lw = 0.5
             if inst_id == ztf_id:
                 zo = 9998
+                alph = 0.15
+                lw = 0.2
 
             for t in tile_list:
-                t.plot(m, ax, edgecolor=clrs[inst_id], facecolor='None', linestyle='-', linewidth=0.25, zorder=zo)
+                t.plot(m, ax, edgecolor=clrs[inst_id], facecolor='None', linestyle='-', linewidth=lw, zorder=zo,
+                       alpha=alph)
 
         parallels = np.arange(-90., 90., 12.)
-        dec_ticks = m.drawparallels(parallels, labels=[0, 1, 0, 0], linewidth=0.5, color="silver", alpha=0.5)
+        dec_ticks = m.drawparallels(parallels, labels=[0, 1, 0, 0], linewidth=0.5, color="silver", alpha=0.25)
         meridians = np.arange(0., 360., 24.0)
-        ra_ticks = m.drawmeridians(meridians, labels=[0, 0, 0, 1], linewidth=0.5, color="silver", alpha=0.5)
+        ra_ticks = m.drawmeridians(meridians, labels=[0, 0, 0, 1], linewidth=0.5, color="silver", alpha=0.25)
 
         ax.invert_xaxis()
 
-        fig.savefig("GW0425_TM_data.png", bbox_inches='tight')
+        fig.savefig("GW0425_TM_western_ortho.png", bbox_inches='tight')
         plt.close('all')
+
 
     # test random detector tiles...
     do_sterographic_test = False
@@ -999,6 +1132,91 @@ if is_debug:
 
         fig.savefig("swope_static_tile_test.png", bbox_inches='tight')
         plt.close('all')
+
+
+    # Generate Observed Tile lists for TM pointings...
+    do_tm_observed_tiles = True
+    if do_tm_observed_tiles:
+
+        # DEBUG print all bands for all points:
+        unique_bands = []
+        for inst_id, pointing_list in treasure_map_pointings.items():
+
+            # what is open?
+            for p in pointing_list:
+                if p[2] == "open":
+                    print(inst_id)
+                    break
+
+            unique_bands += list(set([p[2] for p in pointing_list]))
+        unique_bands = list(set(unique_bands))
+        print(unique_bands)
+
+        # treasure_map_detectors == keyed by TM id
+        # treasure_map_pointings == (pa, (ra, dec), band, obs_time_string, pointing_id) keyed by TM id
+        treasure_map_detector_for_obs_tile = {} # keyed by teglon detector id
+        treasure_map_obs_tile = {}  # keyed by teglon detector id
+        tm_to_teglon_detector_map = {
+            47: 76,
+            11: 62,
+            12: 63,
+            22: 65,
+            71: 59
+        }
+
+        select_tm_detect = '''
+                    SELECT id, Name, ST_AsText(Poly), TM_id FROM Detector WHERE TM_id IS NOT NULL;
+                '''
+        tm_detect_result = query_db([select_tm_detect])[0]
+        for tm_d in tm_detect_result:
+            teglon_id = int(tm_d[0])
+            tm_name = tm_d[1]
+            tm_poly = tm_d[2]
+            tm_id = int(tm_d[3])
+            tm_vertices = Detector.get_detector_vertices_from_teglon_db(tm_poly)
+            tm_detect = Detector(tm_name, tm_vertices)
+
+            treasure_map_detector_for_obs_tile[teglon_id] = tm_detect
+
+        for inst_id, pointing_list in treasure_map_pointings.items():
+
+            tm_detector = treasure_map_detector_for_obs_tile[tm_to_teglon_detector_map[inst_id]]
+            if tm_detector.name not in treasure_map_obs_tile:
+                treasure_map_obs_tile[tm_detector.name] = []
+
+            for pointing in pointing_list:
+                # treasure_map_pointings[inst_id].append((pa, get_skycoord_from_tm_point(pr["position"]), band, obs_time,
+                #                                         pointing_id, mag_lim))
+                pa = float(pointing[0])
+                _ra_deg = float(pointing[1][0])
+                ra_deg = _ra_deg
+                if ra_deg < 0:
+                    ra_deg += 360.0
+                dec_deg = float(pointing[1][1])
+
+                band = pointing[2]
+                datetime_string = pointing[3]
+                mdj = (astropy.time.Time(datetime_string)).mjd
+                pointing_id = int(pointing[4])
+                lim_mag = float(pointing[5])
+
+                # file_name, field_name, ra, dec, mjd, band, exp_time, lim_mag, position_angle
+                pointing_row = ("treasure_map", pointing_id, ra_deg, dec_deg, mdj, band, 0.0, lim_mag, pa)
+
+                treasure_map_obs_tile[tm_detector.name].append(pointing_row)
+
+        for tm_detect_name, obs_list in treasure_map_obs_tile.items():
+            with open("%s_observed_tiles.txt" % tm_detect_name.replace("/", "_"), "w") as csvfile:
+                writer = csv.writer(csvfile, delimiter=" ")
+                writer.writerows(obs_list)
+
+
+
+
+
+
+
+
 
 
     end = time.time()

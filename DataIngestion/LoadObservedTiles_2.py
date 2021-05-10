@@ -60,6 +60,7 @@ from shapely import geometry
 import healpy as hp
 from ligo.skymap import distance
 
+from Detector import *
 from HEALPix_Helpers import *
 from Tile import *
 from SQL_Polygon import *
@@ -93,7 +94,7 @@ db_port = db_config.get('database', 'DATABASE_PORT')
 
 isDEBUG = False
 
-
+# region db methods
 # Database SELECT
 # For every sub-query, the iterable result is appended to a master list of results
 def bulk_upload(query):
@@ -318,7 +319,7 @@ def batch_insert(insert_statement, insert_data, batch_size=50000):
     print("\n********* start DEBUG ***********")
     print("batch_insert execution time: %s" % (_tend - _tstart))
     print("********* end DEBUG ***********\n")
-
+# endregion
 
 # Set up dustmaps config
 config["data_dir"] = "./"
@@ -374,11 +375,13 @@ class Teglon:
             "r": "SDSS r",
             "i": "SDSS i",
             "Clear": "Clear",
+            "open": "Clear",
             "J": "UKIRT J",
             "B":"Landolt B",
             "V": "Landolt V",
             "R": "Landolt R",
-            "I": "Landolt I"
+            "I": "Landolt I",
+            "u": "SDSS u"
         }
 
         detector_mapping = {
@@ -388,7 +391,13 @@ class Teglon:
             "n": "NICKEL",
             "m": "MOSFIRE",
             "k": "KAIT",
-            "si": "SINISTRO"
+            "si": "SINISTRO",
+            "w": "WISE",
+            "gt4": "GOTO-4",
+            "css": "MLS10KCCD-CSS",
+            "sw": "Swift/UVOT",
+            "mmt": "MMTCam",
+            "z": "ZTF",
         }
 
         is_error = False
@@ -476,22 +485,24 @@ class Teglon:
             map_pixel_dict[int(p[2])] = p
 
         band_select = "SELECT id, Name, F99_Coefficient FROM Band WHERE `Name`='%s'"
-        detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec FROM Detector WHERE Name='%s'"
+        detector_select_by_name = "SELECT id, Name, Deg_width, Deg_height, Deg_radius, Area, MinDec, MaxDec, ST_AsText(Poly) FROM Detector WHERE Name='%s'"
 
         obs_tile_insert_data = []
         detectors = {}
 
         tele_name = detector_mapping[self.options.tele]
         detector_result = query_db([detector_select_by_name % tele_name])[0][0]
-        detector = Detector(detector_result[1], float(detector_result[2]), float(detector_result[2]))
-        detector.id = int(detector_result[0])
-        detector.area = float(detector_result[5])
+
+        detector_name = detector_result[1]
+        detector_poly = Detector.get_detector_vertices_from_teglon_db(detector_result[8])
+        detector = Detector(detector_name, detector_poly, detector_id=int(detector_result[0]))
+        # detector = Detector(detector_result[1], float(detector_result[2]), float(detector_result[2]))
+        # detector.id = int(detector_result[0])
+        # detector.area = float(detector_result[5])
 
         if detector.name not in detectors:
             detectors[detector.name] = detector
         print("Processing `%s` for %s" % (tile_path, detector.name))
-
-
 
 
         # Iterate over lines of a tile
@@ -500,17 +511,76 @@ class Teglon:
             csvreader = csv.reader(csvfile, delimiter=' ', skipinitialspace=True)
             for row in csvreader:
 
-                # For Charlie Got Damn it
+                # default PA. Overwrite below if provided
+                position_angle = 0.0
+
+                # # Format 0425
+                # file_name = row[0]
+                # field_name = row[1]
+                # ra = float(row[2])
+                # dec = float(row[3])
+                # exp_time = float(row[4])
+                # mjd = float(row[5])
+                # band = row[6].strip()
+                # mag_lim = float(row[7])
+
+                # Format 0425 Treasure Map
                 file_name = row[0]
                 field_name = row[1]
                 ra = float(row[2])
                 dec = float(row[3])
                 mjd = float(row[4])
-
                 band = row[5].strip()
                 exp_time = float(row[6])
+                mag_lim = float(row[7])
+                position_angle = float(row[8])
+
+                # # Format 0814 Swope, Nickel, Wise
+                # file_name = row[0]
+                # field_name = row[0]
+                # ra = float(row[1])
+                # dec = float(row[2])
+                # mjd = float(row[3])
+                # band = row[4].strip()
+                # exp_time = float(row[5])
+                # mag_lim = float(row[6])
+
+                # # Format 0814 Thacher
+                # file_name = row[0]
+                # field_name = row[1]
+                # ra = float(row[2])
+                # dec = float(row[3])
+                # mjd = float(row[4])
+                # band = row[5].strip()
+                # exp_time = float(row[6])
                 # mag_lim = float(row[7])
-                mag_lim = None
+
+                # Format 0814 MOSFIRE
+                # file_name = row[0]
+                # field_name = row[1]
+                # ra = float(row[2])
+                # dec = float(row[3])
+                # mjd = float(row[4])
+                # band = row[5].strip()
+                # exp_time = float(row[6])
+                # mag_lim = None
+
+                # # Format 0814 LCOGT, KAIT
+                # file_name = row[0]
+                # field_name = row[1]
+                # ra = float(row[2])
+                # dec = float(row[3])
+                # mjd = float(row[4])
+                # band = row[5].strip()
+                # exp_time = float(row[6])
+                # mag_lim = None
+                # try:
+                #     mag_lim = float(row[7])
+                # except:
+                #     pass
+
+
+                # mag_lim = None
 
 
                 # file_name = row[0]
@@ -566,7 +636,9 @@ class Teglon:
                 n128_index = hp.ang2pix(nside128, 0.5 * np.pi - c.dec.radian, c.ra.radian)  # theta, phi
                 n128_id = N128_dict[n128_index]
 
-                t = Tile(c.ra.degree, c.dec.degree, detector.deg_width, detector.deg_height, int(healpix_map_nside))
+                # t = Tile(c.ra.degree, c.dec.degree, detector.deg_width, detector.deg_height, int(healpix_map_nside))
+                t = Tile(c.ra.degree, c.dec.degree, detector, int(healpix_map_nside), position_angle_deg=position_angle)
+
                 t.field_name = field_name
                 t.N128_pixel_id = n128_id
                 t.N128_pixel_index = n128_index
@@ -584,18 +656,20 @@ class Teglon:
                     t.dec_deg,
                     "POINT(%s %s)" % (t.dec_deg, t.ra_deg - 180.0),  # Dec, RA order due to MySQL convention for lat/lon
                     t.query_polygon_string,
+                    # t.create_query_polygon_string(False),
                     str(t.mwe),
                     t.N128_pixel_id,
                     band_id,
                     t.mjd,
                     t.exp_time,
                     t.mag_lim,
-                    healpix_map_id))
+                    healpix_map_id,
+                    t.position_angle_deg))
 
         insert_observed_tile = '''
             INSERT INTO
-                ObservedTile (FileName, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id)
-            VALUES (%s, %s, %s, %s, %s, ST_PointFromText(%s, 4326), ST_GEOMFROMTEXT(%s, 4326), %s, %s, %s, %s, %s, %s, %s)
+                ObservedTile (FileName, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id, PositionAngle)
+            VALUES (%s, %s, %s, %s, %s, ST_PointFromText(%s, 4326), ST_GEOMFROMTEXT(%s, 4326), %s, %s, %s, %s, %s, %s, %s, %s)
         '''
 
         print("Inserting %s tiles..." % len(obs_tile_insert_data))
@@ -606,7 +680,7 @@ class Teglon:
         print("Building observed tile-healpix map pixel relation...")
 
         obs_tile_select = '''
-            SELECT FileName, id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id 
+            SELECT FileName, id, Detector_id, FieldName, RA, _Dec, Coord, Poly, EBV, N128_SkyPixel_id, Band_id, MJD, Exp_Time, Mag_Lim, HealpixMap_id, PositionAngle 
             FROM ObservedTile 
             WHERE Detector_id = %s and HealpixMap_id = %s 
         '''
@@ -622,7 +696,11 @@ class Teglon:
                 ot_id = int(otfd[1])
                 ra = float(otfd[4])
                 dec = float(otfd[5])
-                t = Tile(ra, dec, d.deg_width, d.deg_height, healpix_map_nside)
+                pa = float(otfd[15])
+
+                # t = Tile(ra, dec, d.deg_width, d.deg_height, healpix_map_nside)
+                t = Tile(ra, dec, d, healpix_map_nside, position_angle_deg=pa)
+
                 t.id = ot_id
 
                 for p in t.enclosed_pixel_indices:
@@ -630,7 +708,8 @@ class Teglon:
 
         print("Length of tile_pixel_data: %s" % len(tile_pixel_data))
 
-        tile_pixel_upload_csv = "%s/ObservedTiles/%s_tile_pixel_upload.csv" % (formatted_healpix_dir, detector.name)
+        tile_pixel_upload_csv = "%s/ObservedTiles/%s_tile_pixel_upload.csv" % \
+                                (formatted_healpix_dir, detector.name.replace("/", "_"))
 
         # Create CSV
         try:

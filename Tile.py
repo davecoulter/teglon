@@ -84,7 +84,7 @@ class Tile(Teglon_Shape):
     def query_polygon_string(self):
 
         if not self.__query_polygon_string:
-            self.self.__query_polygon_string = self.create_query_polygon_string(initial_poly_in_radian=False)
+            self.__query_polygon_string = self.create_query_polygon_string(initial_poly_in_radian=False)
         return self.__query_polygon_string
 
     @property
