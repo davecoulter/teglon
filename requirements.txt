@@ -36,7 +36,7 @@ d2to1==0.2.12
 dask==0.19.2
 decorator==4.3.0
 dill==0.2.8.2
-distributed==1.23.2
+distributed==2021.10.0
 docopt==0.6.2
 docutils==0.14
 drizzlepac==2.2.6
